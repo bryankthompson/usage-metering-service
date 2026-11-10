@@ -3,6 +3,7 @@
 Each test guards something that failed (or could fail silently) when it was first tried; the docstring says what.
 """
 import json
+import logging
 import random
 import threading
 import time
@@ -80,6 +81,11 @@ INFINITY = NAN.replace("NaN", "-Infinity")
     pytest.param(raw(tenant_id="t" * 201), id="tenant over 200 chars"),
     pytest.param(raw(occurred_at="0001-01-01T00:00:00+05:00"), id="UTC instant before year 1"),
     pytest.param(raw(occurred_at="9999-12-31T23:59:59.999999-05:00"), id="UTC instant after year 9999"),
+    pytest.param(raw(occurred_at=1762770600), id="unix seconds as a number"),
+    pytest.param(raw(occurred_at=5), id="small number as a timestamp"),
+    pytest.param(raw(occurred_at="1762770600"), id="unix seconds as a string"),
+    pytest.param(raw(occurred_at="-1"), id="negative number as a string"),
+    pytest.param(raw(occurred_at=True), id="bool as a timestamp"),
     pytest.param(raw(tokens_in=5.0), id="float count"),
     pytest.param(raw(tokens_in=True), id="bool count"),
     pytest.param(raw(tokens_in="5"), id="string count"),
@@ -116,6 +122,21 @@ def test_the_extreme_valid_timestamps_are_stored_and_resent(client, conn, when, 
     assert client.post("/v1/usage", json=event(occurred_at=when)).status_code == 201
     assert client.post("/v1/usage", json=event(occurred_at=when)).status_code == 200  # read back without an error
     assert close_hour(conn, hour) == (1, 1)
+
+
+def test_the_idempotency_key_cannot_forge_a_log_line(client, caplog):
+    key = "x\nINFO:     usage accepted: tenant=victim key='fake' event_id=999 late=False"
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        assert client.post("/v1/usage", json=event(idempotency_key=key)).status_code == 201
+        assert client.post("/v1/usage", json=event(idempotency_key=key, tokens_in=11)).status_code == 409
+        assert client.post("/v1/usage", json=event(idempotency_key=key)).status_code == 200
+    lines = [line for line in caplog.text.splitlines() if "usage " in line]
+    assert len(lines) == 3, caplog.text  # accepted, conflict, duplicate: one line each, the newline stays escaped
+
+
+@pytest.mark.parametrize("when", ["2026-11-10T10:30Z", "2026-11-10 10:30:00+00:00", "2026-11-10T10:30:00.5+01:00"])
+def test_the_iso_8601_spellings_that_have_a_time_zone_are_still_accepted(client, when):
+    assert client.post("/v1/usage", json=event(occurred_at=when)).status_code == 201
 
 
 # --- hour boundaries: the rollup row lands in the UTC hour of the instant, whatever the offset -----------------------

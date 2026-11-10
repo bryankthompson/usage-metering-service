@@ -19,7 +19,8 @@ from app import db
 from app.edge import require_entitlement
 from app.rollup import lock_hour_shared
 
-# uvicorn configures this logger at INFO, so these lines show in the server output.
+# uvicorn configures this logger at INFO, so these lines show in the server output. The client's idempotency key
+# is logged with %r: a newline in it must not start a fake log line.
 log = logging.getLogger("uvicorn.error")
 
 
@@ -87,6 +88,15 @@ class UsageEvent(BaseModel):
     tokens_out: StrictInt = Field(ge=0, le=MAX_TOKENS)
     occurred_at: AwareDatetime  # a naive timestamp is a 422
 
+    @field_validator("occurred_at", mode="before")
+    @classmethod
+    def _iso_text(cls, value):
+        """Pydantic reads a number, or a string of digits, as Unix seconds (5 becomes 1970-01-01T00:00:05Z): a
+        client that sends one has a bug, and the event would be billed in the wrong hour without any error."""
+        if not isinstance(value, str) or value.strip().lstrip("+-").replace(".", "", 1).isdigit():
+            raise ValueError("occurred_at must be an ISO 8601 timestamp with a time zone")
+        return value
+
     @field_validator("occurred_at")
     @classmethod
     def _utc_year_in_range(cls, ts):
@@ -140,7 +150,7 @@ def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Con
     inserted = conn.execute(INSERT_EVENT, params).fetchone()
     if inserted is not None:
         conn.commit()
-        log.info("usage accepted: tenant=%s key=%s event_id=%s late=%s",
+        log.info("usage accepted: tenant=%s key=%r event_id=%s late=%s",
                  tenant, event.idempotency_key, inserted["id"], inserted["late"])
         return {"status": "accepted", "event_id": inserted["id"], "late": inserted["late"]}
 
@@ -151,10 +161,10 @@ def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Con
     same = (existing["model"], existing["tokens_in"], existing["tokens_out"], existing["occurred_at"]) == (
         event.model, event.tokens_in, event.tokens_out, event.occurred_at)
     if not same:
-        log.warning("usage conflict: tenant=%s key=%s reused with a different payload (event_id=%s)",
+        log.warning("usage conflict: tenant=%s key=%r reused with a different payload (event_id=%s)",
                     tenant, event.idempotency_key, existing["id"])
         raise HTTPException(status_code=409, detail="idempotency_key was already used with a different payload")
-    log.info("usage duplicate: tenant=%s key=%s event_id=%s late=%s",
+    log.info("usage duplicate: tenant=%s key=%r event_id=%s late=%s",
              tenant, event.idempotency_key, existing["id"], existing["late"])
     response.status_code = 200
     return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}
