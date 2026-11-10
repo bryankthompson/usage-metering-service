@@ -313,3 +313,25 @@ def test_every_that_is_not_a_whole_number_is_refused_before_anything_runs(every,
         rollup.main(["--every", every])
     assert exit_info.value.code == 2
     assert "nothing due" not in capsys.readouterr().out
+
+
+# --- tenant spoofing through the real edge (no dependency override) -----------------------------------------------------
+
+def test_a_tenant_cannot_post_usage_as_another_tenant(conn):
+    for tenant in ("tenant-a", "tenant-b"):
+        conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES (%s, 'active')", (tenant,))
+    conn.commit()
+    assert app.dependency_overrides == {}, "an override left by another test would hide the real edge"
+    client = TestClient(app, raise_server_exceptions=False)
+
+    def post(header_tenant, body_tenant, key):
+        return client.post("/v1/usage", json=event(tenant_id=body_tenant, idempotency_key=key),
+                           headers={"X-Tenant-Id": header_tenant}).status_code
+
+    assert post("tenant-a", "tenant-b", "spoof") == 403   # header says a, body says b: nothing stored for either
+    assert post("tenant-b", "tenant-a", "spoof") == 403
+    assert post("tenant-a", "TENANT-A", "case") == 403    # the body must match the admitted tenant exactly
+    assert post("tenant-a", " tenant-a", "space") == 403
+    assert post(" tenant-a ", "tenant-a", "padded") == 201  # the edge trims the header, so this is tenant-a itself
+    assert post("tenant-a", "tenant-a", "spoof") == 201   # the refused key was never used up
+    assert [r["tenant_id"] for r in conn.execute("SELECT tenant_id FROM usage_events ORDER BY id")] == ["tenant-a"] * 2
