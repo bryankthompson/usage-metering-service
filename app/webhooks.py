@@ -60,6 +60,10 @@ def verify(payload: bytes, signature: str | None) -> dict:
     if not signature:
         log.warning("webhook refused: no Stripe-Signature header")
         raise HTTPException(status_code=400, detail="missing Stripe-Signature header")
+    if not signature.isascii():
+        # The library compares signatures with hmac.compare_digest, which raises TypeError (a 500) on non-ASCII text.
+        log.warning("webhook refused: Stripe-Signature header is not ASCII")
+        raise HTTPException(status_code=400, detail="invalid signature or payload")
     try:
         return stripe.Webhook.construct_event(payload, signature, secret).to_dict()
     except (ValueError, AttributeError, RecursionError, stripe.SignatureVerificationError) as err:

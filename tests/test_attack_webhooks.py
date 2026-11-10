@@ -322,3 +322,10 @@ def test_livemode_is_not_read_so_a_live_mode_event_signed_with_the_secret_is_app
     payload = json.dumps({"id": "evt_live", "type": "customer.subscription.updated", "created": int(time.time()), "livemode": True,
                           "data": {"object": sub}}).encode()
     assert post(client, payload).json() == {"status": "processed"}
+
+
+@pytest.mark.parametrize("header", [b"t=1,v1=\xff\xfe", b"\xff", b"t=\xe3\x83\x86,v1=00", b"t=1,v1=\x00\x01", "t=" + "9" * 5000 + ",v1=00"])
+def test_signature_headers_with_odd_bytes_are_400_never_a_500(client, conn, header):
+    resp = client.post(URL, content=fresh_event(), headers={"Stripe-Signature": header})
+    assert resp.status_code == 400
+    assert counts(conn) == (0, 0)

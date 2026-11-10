@@ -330,3 +330,25 @@ def test_a_non_ascii_tenant_can_use_the_whole_route(client, conn):
     assert resp.status_code == 200 and resp.json()["total_micros"] == 2000
     posted = client.post("/v1/usage", json=usage_body("tenant-é"), headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
     assert posted.status_code == 201
+
+
+# --- the 422 body itself must be serializable: FastAPI echoes the offending input ---
+
+@pytest.mark.parametrize("query", [
+    "start=NaN&end=Infinity", "start=-Infinity&end=1e999", "start=%ED%A0%80&end=%ED%B0%80",          # lone surrogates, UTF-8 encoded
+    "start=%FF%FE&end=%C0%AF", "start=%00&end=%00", "start=2026-11-01T00:00:00Z%00&end=2026-11-02T00:00:00Z",
+    "start=%F0%9F%98%80&end=%E3%83%86", "start=" + "%E3" * 3000 + "&end=x", "start[]=1&end[]=2",
+    "start=2026-11-01T00:00:00Z&start=2026-11-01T00:00:00Z&end=junk",
+])
+def test_hostile_query_strings_are_422_never_a_500(client, conn, query):
+    entitle(conn, "tenant-1")
+    resp = client.get(f"/v1/tenants/tenant-1/charges?{query}", headers={"X-Tenant-Id": "tenant-1"})
+    assert resp.status_code == 422, resp.text
+    assert isinstance(resp.json()["detail"], (str, list))
+
+
+@pytest.mark.parametrize("path", ["/v1/tenants/%ED%A0%80/charges", "/v1/tenants/%FF/charges", "/v1/tenants/%00/charges", "/v1/tenants/%E3%83%86/charges"])
+def test_hostile_path_tenants_are_403_never_a_500(client, conn, path):
+    entitle(conn, "tenant-1")
+    resp = client.get(path + "?" + "&".join(f"{k}={v}" for k, v in RANGE.items()), headers={"X-Tenant-Id": "tenant-1"})
+    assert resp.status_code == 403, resp.text
