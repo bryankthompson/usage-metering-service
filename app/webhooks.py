@@ -23,9 +23,20 @@ SUBSCRIPTION_EVENTS = {"customer.subscription.created", "customer.subscription.u
 STATUS_MAP = {"active": "active", "trialing": "active", "past_due": "past_due"}
 
 
+MAX_BODY_BYTES = 1024 * 1024        # a Stripe event is a few KB; 1 MiB leaves room, and the endpoint is public
+
+
 async def raw_body(request: Request) -> bytes:
-    """The request body exactly as sent: the signature covers the raw bytes, not parsed JSON."""
-    return await request.body()
+    """The request body exactly as sent: the signature covers the raw bytes, not parsed JSON.
+
+    Read before the signature is checked, so it is capped: a 600 MB unsigned body took the API to 2.4 GiB of memory.
+    """
+    body = bytearray()
+    async for chunk in request.stream():                     # counted as it arrives, so memory stays near the cap
+        body += chunk
+        if len(body) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="webhook body too large")
+    return bytes(body)
 
 
 def grace_hours() -> int:

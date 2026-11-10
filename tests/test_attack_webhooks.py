@@ -133,12 +133,24 @@ def test_an_empty_body_is_400(client, conn):
     assert counts(conn) == (0, 0)
 
 
-def test_a_20_megabyte_unsigned_body_is_400_and_fast(client, conn):
-    big = b"x" * (20 * 1024 * 1024)
+def test_a_body_over_one_mebibyte_is_413_before_anything_else_and_exactly_one_mebibyte_is_still_read(client, conn):
+    # The body is read before the signature can be checked, so it is capped: 600 MB unsigned took the API to 2.4 GiB.
+    limit = 1024 * 1024
     started = time.monotonic()
-    resp = client.post(URL, content=big, headers={"Stripe-Signature": "t=1,v1=00"})
-    assert resp.status_code == 400
+    assert client.post(URL, content=b"x" * (limit + 1), headers={"Stripe-Signature": "t=1,v1=00"}).status_code == 413
+    assert client.post(URL, content=b"x" * (20 * 1024 * 1024), headers={"Stripe-Signature": "t=1,v1=00"}).status_code == 413
     assert time.monotonic() - started < 5
+    assert client.post(URL, content=b"x" * limit, headers={"Stripe-Signature": "t=1,v1=00"}).status_code == 400   # read, then refused
+    assert counts(conn) == (0, 0)
+
+
+def test_a_chunked_body_over_the_cap_is_413_too(client, conn):
+    def chunks():
+        for _ in range(3):
+            yield b"x" * (512 * 1024)                          # no Content-Length: the size is only known by counting
+
+    resp = client.post(URL, content=chunks(), headers={"Stripe-Signature": "t=1,v1=00"})
+    assert resp.status_code == 413
     assert counts(conn) == (0, 0)
 
 
