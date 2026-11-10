@@ -297,3 +297,36 @@ def test_a_three_year_range_of_hourly_rows_is_billed_in_reasonable_time(conn):
     elapsed = time.monotonic() - started
     assert len(lines) == 10_000 and total == 5000 * 30                  # m1 30 micros an hour; m2 0.07 rounds to 0
     assert elapsed < 3, f"10,000 rows took {elapsed:.1f}s: one price lookup per row"
+
+
+# --- the whole route with the real edge: header, path and body must name one tenant ---
+
+def usage_body(tenant, key="k1"):
+    return {"tenant_id": tenant, "idempotency_key": key, "model": "m1", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-01T00:30:00Z"}
+
+
+def test_usage_for_another_tenant_is_403_and_stored_nowhere_even_when_both_are_entitled(client, conn):
+    entitle(conn, "tenant-a")
+    entitle(conn, "tenant-b")
+    assert client.post("/v1/usage", json=usage_body("tenant-b"), headers={"X-Tenant-Id": "tenant-a"}).status_code == 403
+    assert client.post("/v1/usage", json=usage_body("tenant-a", "k2"), headers={"X-Tenant-Id": "tenant-b"}).status_code == 403
+    assert conn.execute("SELECT count(*) AS n FROM usage_events").fetchone()["n"] == 0
+    assert client.post("/v1/usage", json=usage_body("tenant-a"), headers={"X-Tenant-Id": "tenant-a"}).status_code == 201
+
+
+def test_a_canceled_tenant_cannot_post_or_read_with_its_own_name(client, conn):
+    entitle(conn, "tenant-c", status="canceled")
+    assert client.post("/v1/usage", json=usage_body("tenant-c"), headers={"X-Tenant-Id": "tenant-c"}).status_code == 402
+    assert charges(client, "tenant-c").status_code == 402
+    assert conn.execute("SELECT count(*) AS n FROM usage_events").fetchone()["n"] == 0
+
+
+def test_a_non_ascii_tenant_can_use_the_whole_route(client, conn):
+    # Header as UTF-8 bytes, path percent-encoded, body as JSON: three spellings of one tenant must agree.
+    add_price_version(conn, "m1", T0, 1000, 2000)
+    entitle(conn, "tenant-é")
+    rollup(conn, "tenant-é", "m1", T0, 1000, 500)
+    resp = client.get("/v1/tenants/tenant-%C3%A9/charges", params=RANGE, headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
+    assert resp.status_code == 200 and resp.json()["total_micros"] == 2000
+    posted = client.post("/v1/usage", json=usage_body("tenant-é"), headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
+    assert posted.status_code == 201
