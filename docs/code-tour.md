@@ -3,7 +3,7 @@
 For a reader who has written Python for about a year. Each item says what the feature is, where it is used here, and what
 would break without it. Line numbers are for the tree this was written on; `grep -n` the quoted text if they have moved.
 
-## 1. A decorator: `@app.get("/healthz")` (`app/main.py:25`)
+## 1. A decorator: `@app.get("/healthz")` (`app/main.py:46`)
 A decorator is a function that takes the function written under it and registers or wraps it. This one tells FastAPI
 "answer GET /healthz by calling `healthz`", and gives the function back unchanged.
 Without it, `healthz` is an ordinary function nobody calls, and `GET /healthz` answers 404.
