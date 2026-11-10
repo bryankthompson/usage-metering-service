@@ -6,7 +6,7 @@
 3. Sends a locally signed `customer.subscription.updated` event to `/v1/stripe/webhook` (expects 200 `processed`).
 4. Shows the edge refusing an unknown tenant (402) and a request with no `X-Tenant-Id` (401).
 5. Posts three usage events (201, 201, and a resend answered 200 `duplicate`).
-6. Runs `python -m app.rollup` in the rollup container: it closes every due hour, this one included (`rows=1 events=2`).
+6. Runs `python -m app.rollup` in the rollup container: it closes every due hour, this one included (the demo checks its own hour is in the output).
 7. Reads the charges for the hour and asserts `total_micros == 6000`
    (3000 in and 500 out: (3000*1500 + 500*3000) / 1000).
 

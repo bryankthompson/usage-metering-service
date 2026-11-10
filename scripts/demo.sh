@@ -74,9 +74,11 @@ STEP_WHAT="resend of usage 1 (duplicate)"; post 200 "$E1"
 # 6. close the hour (the rollup closes hours that ended 5+ minutes ago)
 OUT=$(docker compose exec -T rollup python -m app.rollup)
 echo "$OUT"
-echo "$OUT" | grep -qx "closed hour=$ISO rows=1 events=2" \
-  || { echo "FAIL step 6: expected 'closed hour=$ISO rows=1 events=2', got: $OUT"; exit 1; }
-echo "step 6: rollup -> closed hour=$ISO rows=1 events=2"
+# the rollup closes every unclosed hour in the database, so other tenants' rows may share the line: check our hour
+# closed with at least our row and events; the exact 6000 total in step 7 is the per-tenant check
+echo "$OUT" | grep -q "^closed hour=$ISO rows=" \
+  || { echo "FAIL step 6: expected a 'closed hour=$ISO' line, got: $OUT"; exit 1; }
+echo "step 6: rollup -> closed hour=$ISO"
 
 # 7. charges: 3000*1500 + 500*3000 = 6,000,000 / 1000 = 6000 micros
 STEP_WHAT="charges for the hour"
