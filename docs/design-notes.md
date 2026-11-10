@@ -1,0 +1,77 @@
+# Design notes: what is built, where more would attach, what was cut
+
+Nothing in the sections "Where things would attach" and "A day against a week" is built. Each item is marked NOT BUILT
+and tied to the line in the existing code where it would attach. The "estimate" sizes are guesses, not measurements.
+
+## 1. What is built, and the one rule behind it
+
+The rule: write the fact down first, derive everything else from it, and when unsure, deny.
+
+- **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:20-29`).
+- **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:113-120`) and `app.reconcile`
+  recomputes it with its own SQL to check it (`docs/reconcile.md`).
+- **Prices versioned.** A stored price version cannot change; a new price is a new version (`db/002_billing.sql:14-23`,
+  `app/pricing.py:42-43`). Money is integer micro-USD (`docs/billing.md`).
+- **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`app/edge.py:256-269`).
+
+## 2. Where things would attach (NOT BUILT)
+
+**A queue or stream in front of ingest.** The seam is the single `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
+(`app/ingest.py:28-35`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
+changes: `POST /v1/usage` would publish and answer once the broker has the message, so a 201 would mean "queued", not "stored"
+(today 201 means committed, `app/ingest.py:67-72`), and the `late` flag could not be returned to the caller. What stays: the log,
+the shared hour lock taken by the consumer (`app/ingest.py:66`) and the rollup. Failure added: a message the consumer cannot
+insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
+
+**A columnar store for rollups at scale.** The seam is `AGGREGATE_HOUR` and the two rollup tables (`app/rollup.py:113-120`,
+`db/001_usage.sql`). After `close_hour` commits (`app/rollup.py:165-166`), the same rows would be written to the columnar
+store (a dual write). What stays: the log remains the source and the Postgres rollup remains the bill. Comparison: export the
+columnar totals as the JSON lines file `app.reconcile --actuals` already reads (`docs/reconcile.md`); drift above tolerance exits 1.
+Failure added: the second write can fail after the first commits, so it needs its own retry and the reconcile run is the detector.
+
+**Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check;
+`api` is `uvicorn` and waits for a healthy `db`; `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped`.
+Found while reading: only `db` has a health check, and `api` has neither a health check nor a restart policy, although the app
+has `GET /healthz` (`app/main.py:12-14`). A cluster would add liveness and readiness probes on `/healthz` (which does not touch
+the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and secrets in place of the fake
+`STRIPE_WEBHOOK_SECRET` in the file. No manifests are written and none are tested.
+
+**Private deployments that cannot report to a central service.** A site-side spool would write usage events as JSON lines in the
+same shape as the `POST /v1/usage` body, with the same idempotency keys. The file is carried out of the boundary and imported
+through the same insert, so importing it twice is safe (replay-safe by the key). What stays: everything after the insert.
+The limit: an event for an hour that is already closed here is stored and flagged `late = true` and is never billed
+(`app/ingest.py:31-32`, `docs/ingest.md`). A real design needs a late-adjustment rule, such as a credit or debit line on a later
+invoice. That rule is NOT designed.
+
+**Pushing usage to a payment provider.** The seam is the closed rollup rows. It needs a table of pushed hours, an idempotency
+identifier per tenant and hour (so a retried push is not a second charge), and a retry rule for failures. Nothing calls the
+provider today (`README.md`, "Not built").
+
+## 3. Decisions and why
+
+| Decision | Why | Cost |
+|--|--|--|
+| Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`app/rollup.py:137-139,161`, `app/ingest.py:64-66`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
+| Late events flagged and never billed, instead of reopening a closed hour | A closed hour never changes, so a bill already produced stays true (`docs/ingest.md`, "Late events"). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
+| Grace counted from the first failure | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). |
+| One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
+| Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`app/webhooks.py:22-23,74`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
+| Prices as immutable versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`db/002_billing.sql:14-23`). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
+| The edge reads the entitlement on its own connection | A database that is down answers 503 at the edge instead of an unrelated 500 (`app/edge.py:250-262`, `docs/ingest.md`). | One extra connection per request. |
+| Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
+
+## 4. A day against a week
+
+The first working version took one afternoon: the log shows the scaffold at 15:08 and the last core slice merged at 16:20, with
+the README and hardening after that (`docs/build-log.md`). It contains intake, rollups, versioned prices, webhooks, the edge, compose,
+the demo and, later, reconcile. A further week would buy the items below. Sizes are estimates.
+
+| Item | Why it is not here | Size in days (estimate) | The test that would show it worked |
+|--|--|--|--|
+| Real authentication | The tenant is the `X-Tenant-Id` header; identity needs a decision on who issues credentials. | 2 to 3 | A request with a forged tenant header and a valid credential for another tenant gets 401 or 403 and stores nothing. |
+| Late adjustments | The rule (credit or debit on a later invoice) is not designed. | 3 to 4 | A late event for a closed hour produces one adjustment line on the next period's charges, once, and a resend adds none. |
+| Payment-provider push | Test mode only; needs the pushed-hours table and retry rule. | 3 to 5 | A provider that fails the first call and succeeds the second receives one usage record per hour, identified by its idempotency identifier. |
+| A queue | No load figure exists that shows Postgres alone is not enough. | 3 to 4 | Publish the same event twice and kill the consumer mid-batch: the log holds one row per key. |
+| A columnar store | No data volume that needs it. | 4 to 5 | After a dual-written period, `app.reconcile --actuals` against the columnar export exits 0; an altered row exits 1. |
+| A cluster deployment | Compose was enough to demo; manifests would be untested guesses. | 3 to 5 | Kill the API and the rollup pod: both come back, the rollup closes the hour once, `/v1/usage` answers again. |
+| A usage dashboard | No query API over rollups exists (`README.md`, "Not built"). | 3 to 4 | The dashboard totals for an hour equal `total_micros` from the charges route for the same range. |
