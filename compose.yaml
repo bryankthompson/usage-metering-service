@@ -7,8 +7,11 @@ services:
       POSTGRES_DB: metering
     ports:
       - "${DB_PORT:-5432}:5432"
+    volumes:
+      # Postgres runs db/*.sql in filename order the first time the data volume is created.
+      - ./db:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U metering"]
+      test: ["CMD-SHELL", "pg_isready -U metering -h 127.0.0.1"]  # TCP: the first-start init server only listens on a socket
       interval: 2s
       timeout: 3s
       retries: 20
