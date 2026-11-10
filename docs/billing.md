@@ -73,3 +73,13 @@ It opens its own database connection (one extra per request), so a database that
 
 Tests: `uv run pytest -q tests/test_webhooks.py tests/test_edge.py` (signed with a fake `whsec_test_...` secret).
 Not done: calling Stripe, usage push, invoices, real authentication.
+
+## Delinquent report
+`python -m app.delinquent` reads `entitlements` and lists every `past_due` or `canceled` tenant (read-only). `state` is
+`in_grace` (whole hours left), `grace_expired` (whole hours ago), `past_due_no_grace` (denied, no grace recorded) or
+`canceled`. Denied tenants come first, then `in_grace` by least time left. The rule is the edge's own (`edge.in_grace`:
+`now <= grace_until` is still in grace) and the clock is `edge.now`.
+- `--json`: one object per line; default is a plain table.
+- `--fail-on-expired`: exit 1 when any `past_due` tenant is denied (`grace_expired` or `past_due_no_grace`), else 0.
+- `--at ISO`: evaluate at that instant (needs a zone) instead of now. A bad argument exits 2.
+Test: `uv run pytest -q tests/test_delinquent.py`.
