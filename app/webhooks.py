@@ -43,7 +43,7 @@ def grace_hours() -> int:
 def verify(payload: bytes, signature: str | None) -> dict:
     """The event as a plain dict, or HTTPException 503 (no secret configured) / 400 (unsigned, bad or stale signature)."""
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    if not secret:
+    if not secret or not secret.strip():                      # a blank secret is no secret: 503, not a "bad signature" 400
         log.error("webhook refused: STRIPE_WEBHOOK_SECRET is not set")
         raise HTTPException(status_code=503, detail="webhook secret not configured")
     if not signature:
@@ -51,9 +51,16 @@ def verify(payload: bytes, signature: str | None) -> dict:
         raise HTTPException(status_code=400, detail="missing Stripe-Signature header")
     try:
         return stripe.Webhook.construct_event(payload, signature, secret).to_dict()
-    except (ValueError, stripe.SignatureVerificationError) as err:
+    except (ValueError, AttributeError, RecursionError, stripe.SignatureVerificationError) as err:
+        # Only a body that is correctly signed gets parsed, and the library raises AttributeError for signed JSON that
+        # is not an object (`[]`, `null`, `123`) and RecursionError for JSON nested thousands deep.
         log.warning("webhook refused: %s", err)
         raise HTTPException(status_code=400, detail="invalid signature or payload") from err
+
+
+def _text(value: object) -> str | None:
+    """`value` when it is text PostgreSQL can store (a str without NUL), else None. Signed does not mean well-formed."""
+    return value if isinstance(value, str) and "\x00" not in value else None
 
 
 def _lock_entitlement(conn: psycopg.Connection, column: str, value: str) -> dict | None:
@@ -62,7 +69,8 @@ def _lock_entitlement(conn: psycopg.Connection, column: str, value: str) -> dict
 
 def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
     sub = event["data"]["object"]
-    tenant_id = (sub.get("metadata") or {}).get("tenant_id")
+    metadata = sub.get("metadata")
+    tenant_id = _text(metadata.get("tenant_id")) if isinstance(metadata, dict) else None
     if not tenant_id:
         return "ignored", None
     # Serialize per tenant even when no row exists yet, so a concurrent first insert cannot be overwritten by an older event.
@@ -71,9 +79,17 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
     # A deleted subscription is canceled whatever status its payload carries (fail closed).
-    status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(sub.get("status"), "canceled")
-    items = (sub.get("items") or {}).get("data") or [{}]
-    plan = (items[0].get("price") or {}).get("id") or (row and row["plan"])
+    raw_status = sub.get("status")
+    status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(
+        raw_status if isinstance(raw_status, str) else None, "canceled")
+    items, price = sub.get("items"), None
+    data = items.get("data") if isinstance(items, dict) else None
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        price = data[0].get("price")
+    # A field that is missing or unusable keeps the stored value instead of erasing it.
+    plan = (_text(price.get("id")) if isinstance(price, dict) else None) or (row and row["plan"])
+    customer = _text(sub.get("customer")) or (row and row["stripe_customer_id"])
+    subscription_id = _text(sub.get("id")) or (row and row["stripe_subscription_id"])
     payment_failed_at, grace_until = (row["payment_failed_at"], row["grace_until"]) if row else (None, None)
     if status == "active":
         payment_failed_at = grace_until = None
@@ -85,13 +101,13 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
         " stripe_subscription_id = EXCLUDED.stripe_subscription_id, plan = EXCLUDED.plan, status = EXCLUDED.status,"
         " payment_failed_at = EXCLUDED.payment_failed_at, grace_until = EXCLUDED.grace_until,"
         " last_event_at = EXCLUDED.last_event_at, updated_at = now()",
-        {"t": tenant_id, "c": sub.get("customer"), "s": sub.get("id"), "p": plan, "st": status,
+        {"t": tenant_id, "c": customer or None, "s": subscription_id or None, "p": plan or None, "st": status,
          "pf": payment_failed_at, "g": grace_until, "le": created})
     return "processed", tenant_id
 
 
 def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
-    customer = event["data"]["object"].get("customer")
+    customer = _text(event["data"]["object"].get("customer"))
     row = _lock_entitlement(conn, "stripe_customer_id", customer) if customer else None
     if row is None:
         return "ignored", None
@@ -129,6 +145,8 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
     try:
         if not isinstance(event["id"], str) or not isinstance(event["type"], str):
             raise TypeError("event id and type must be strings")
+        if "\x00" in event["id"]:
+            raise ValueError("event id contains a NUL byte")
         if not isinstance(event["data"]["object"], dict):
             raise TypeError("event data.object must be an object")
         created = datetime.fromtimestamp(event["created"], tz=timezone.utc)

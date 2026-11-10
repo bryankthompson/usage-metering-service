@@ -8,6 +8,7 @@ Prices are per model and versioned: a new price is a new row, a stored version i
 charge for a past hour is rated with the price that applied then.
 """
 import logging
+from bisect import bisect_right
 from datetime import datetime
 
 import psycopg
@@ -30,14 +31,22 @@ def _require_aware(value: datetime, name: str) -> None:
         raise ValueError(f"{name} must be timezone-aware")
 
 
+def _require_int(value: object, name: str) -> None:
+    # PostgreSQL would round a float (1.5 becomes 2) and take True as 1: a price is never silently changed.
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an int of micro-USD, got {value!r}")
+
+
 def add_price_version(conn: psycopg.Connection, model: str, effective_from: datetime,
                       input_micros_per_1k: int, output_micros_per_1k: int) -> int:
     """Store the next version (1, 2, ...) for `model` and return its number. Commits.
 
     Two writers racing for the same number collide on the primary key and one raises; neither
-    overwrites the other.
+    overwrites the other. A price that is not an int (a float, a bool, a string) raises TypeError.
     """
     _require_aware(effective_from, "effective_from")
+    _require_int(input_micros_per_1k, "input_micros_per_1k")
+    _require_int(output_micros_per_1k, "output_micros_per_1k")
     row = conn.execute(
         "INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
         " SELECT %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s FROM price_versions WHERE model = %s"
@@ -62,6 +71,13 @@ def price_at(conn: psycopg.Connection, model: str, at: datetime) -> dict:
     if row is None:
         raise NoPrice(f"no price for model {model!r} at {at.isoformat()}")
     return row
+
+
+def _in_force(keys: list[datetime], versions: list[dict], at: datetime) -> dict | None:
+    """What `price_at` selects, from versions already loaded and sorted by (effective_from, version); `keys` are their
+    effective_from values. The last one at or before `at` wins, so a tie goes to the later version."""
+    index = bisect_right(keys, at)
+    return versions[index - 1] if index else None
 
 
 def _rate(version: dict, tokens_in: int, tokens_out: int) -> int:
@@ -94,9 +110,20 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
         "SELECT model, hour_start, tokens_in, tokens_out FROM usage_rollups_hourly"
         " WHERE tenant_id = %s AND hour_start >= %s AND hour_start < %s ORDER BY hour_start, model",
         (tenant_id, start, end)).fetchall()
+    # One query for every version of the models in range, not one per row: a year of hourly rows is thousands.
+    models = sorted({row["model"] for row in rows})
+    loaded: dict[str, list[dict]] = {model: [] for model in models}
+    if models:
+        for v in conn.execute(
+                "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
+                " WHERE model = ANY(%s) ORDER BY effective_from, version", (models,)):
+            loaded[v["model"]].append(v)
+    keys = {model: [v["effective_from"] for v in versions] for model, versions in loaded.items()}
     lines = []
     for row in rows:
-        version = price_at(conn, row["model"], row["hour_start"])
+        version = _in_force(keys[row["model"]], loaded[row["model"]], row["hour_start"])
+        if version is None:
+            raise NoPrice(f"no price for model {row['model']!r} at {row['hour_start'].isoformat()}")
         lines.append({
             "model": row["model"],
             "hour_start": row["hour_start"],

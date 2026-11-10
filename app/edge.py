@@ -39,7 +39,13 @@ def require_entitlement(request: Request) -> str:
     The entitlement is read on its own connection, so a database that is down fails here as 503 and
     never lets the request through.
     """
-    tenant_id = (request.headers.get("x-tenant-id") or "").strip()
+    tenant_id = request.headers.get("x-tenant-id") or ""
+    try:
+        # The server hands header bytes over as latin-1; clients send UTF-8, so a non-ASCII tenant id arrives garbled.
+        tenant_id = tenant_id.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        pass                                                    # not UTF-8: keep it as received, it just will not match
+    tenant_id = tenant_id.strip(" \t")                          # HTTP optional whitespace is a space or a tab, nothing else
     if not tenant_id:
         raise _deny(401, None, "X-Tenant-Id header is required")
     try:
