@@ -42,7 +42,8 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 - `customer.subscription.created`, `.updated` and `.deleted` write the tenant's entitlement row, keyed by
   `subscription.metadata.tenant_id`: `active` and `trialing` become `active` (clearing any failure and grace
   period), `past_due` becomes `past_due` and keeps an existing grace period, any other Stripe status becomes
-  `canceled`, and `.deleted` is always `canceled`.
+  `canceled`, and `.deleted` is always `canceled`. One subscription per tenant is assumed: deleting any
+  subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one.
 - `invoice.payment_failed` sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
   from the first failure: Stripe's retries of the same failed invoice do not extend it, and an `active`
   subscription event clears it. It does not reopen a `canceled` tenant. A `GRACE_PERIOD_HOURS` that is not an
