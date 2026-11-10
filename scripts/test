@@ -11,8 +11,12 @@ if [ -z "${DATABASE_URL:-}" ]; then
   if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" -e POSTGRES_USER=metering -e POSTGRES_PASSWORD=metering \
-      -e POSTGRES_DB=metering -p "$PORT:5432" postgres:16 >/dev/null
+      -e POSTGRES_DB=metering -p "127.0.0.1:$PORT:5432" postgres:16 >/dev/null
     echo "started $NAME on port $PORT"
+  fi
+  if docker port "$NAME" 5432/tcp | grep -qv '^127\.0\.0\.1:'; then
+    echo "WARNING: $NAME publishes its port beyond 127.0.0.1 (an older container; it holds test data only)." >&2
+    echo "         To recreate it on loopback, run 'docker rm -f $NAME' when no test run is in progress." >&2
   fi
   until docker exec "$NAME" pg_isready -U metering -h 127.0.0.1 >/dev/null 2>&1; do sleep 1; done
   DB="metering_$(pwd | md5sum | cut -c1-8)"

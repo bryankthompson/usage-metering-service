@@ -1,9 +1,9 @@
 """Hourly rollups. Owner: dev A.
 
 `close_hour` aggregates one UTC hour of usage events per (tenant, model) into `usage_rollups_hourly`
-and records the hour in `closed_hours`, in one transaction. An event is in the closed rollup or
-flagged `late`, never both and never neither, because ingest and close serialize on a per-hour
-advisory lock (see docs/ingest.md).
+and records the hour in `closed_hours`, in one transaction. Every event of a closed hour is in its
+closed rollup or flagged `late`, never both and never neither, because ingest and close serialize on a
+per-hour advisory lock (see docs/ingest.md).
 
 CLI: `python -m app.rollup` closes every due hour once; `--every SECONDS` repeats forever.
 """

@@ -19,7 +19,8 @@ half up ONCE on that sum. Example: 1 token at 1,500 micros per 1k is 1.5, which 
 `usage_rollups_hourly` rows with `start <= hour_start < end`. Each row is rated at its own `hour_start`, so a price
 change mid-period applies from its effective time. Each row is rounded on its own; `total_micros` is the sum of lines.
 Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes or `start >= end`,
-409 if a row has no price in force (the response names the model).
+409 if a row has no price in force (the response names the model). The route sits behind `require_entitlement`, so
+the edge can also answer 401, 402 or 503 as in the edge table below.
 
 ## Tests
 `DATABASE_URL=... uv run pytest -q tests/test_pricing.py tests/test_pricing_charges.py` (needs Postgres, see `compose.yaml`).
@@ -52,8 +53,8 @@ failure's own time (200 `processed`, `last_event_at` unchanged). It can be short
 failure belongs to an earlier, cured delinquency, and with failures delivered out of order by more than the retry
 spacing it can be later than Stripe's first failure. A later older failure does not move an existing window.
 
-`GRACE_PERIOD_HOURS` must be an integer from 0 to 8760, otherwise the webhook answers 503 and the event is not
-recorded (Stripe retries). Assumption: one Stripe customer is one tenant; two tenants sharing a customer id would have
+`GRACE_PERIOD_HOURS` must be an integer from 0 to 8760, otherwise an `invoice.payment_failed` that has to open a grace
+window answers 503 and is not recorded (Stripe retries); other events are unaffected. Assumption: one Stripe customer is one tenant; two tenants sharing a customer id would have
 invoice events applied to an arbitrary one, which is not handled.
 Assumption: one subscription per tenant. A `customer.subscription.deleted` for any subscription carrying the tenant's
 `metadata.tenant_id` cancels the tenant, so change a plan by updating the same subscription; with two live
