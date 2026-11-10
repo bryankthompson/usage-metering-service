@@ -127,3 +127,10 @@ Entries are written when the event happens. Times are US Central, 2026-11-10 onw
   the final review) and for the devs to work while the README is in review. The lead briefed each dev to attack the
   other's slice: dev A the Stripe webhook, entitlement, edge and pricing code, dev B the ingest, rollup and compose code,
   each with a probe list, a rule to fix real defects with a failing-first test, and a handoff time.
+- **17:16** DRC handback for readme: 3 found, 1 folded, 1 owed. The fold made `scripts/test` refuse to run against an
+  older shared test container that publishes its port beyond loopback; the owed finding was that this check passes
+  when `docker port` prints nothing. The lead asked the advisor, which advised turning the refusal into a one-line
+  warning: the container holds a fake test database and can be recreated, and a refusal would have stopped both devs'
+  test runs in the middle of the hardening round. The lead made that change in one extra commit, ran `scripts/test`
+  against the old container (warning printed, 121 tests pass) and a loopback one (no warning), and accepted the
+  owed finding as an advisory check that can still miss. The old container is removed once the devs hand off.
