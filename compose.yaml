@@ -21,6 +21,7 @@ services:
     environment:
       DATABASE_URL: postgresql://metering:metering@db:5432/metering
       STRIPE_WEBHOOK_SECRET: whsec_test_only_not_a_real_secret
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:

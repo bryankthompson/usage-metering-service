@@ -76,6 +76,13 @@ It opens its own database connection (one extra per request), so a database that
 | `past_due` | allowed while `now <= grace_until`; 402 after, or with no `grace_until` |
 | database error | 503, never allowed |
 
+## Logging
+Every webhook outcome is one INFO line in the container log (`docker compose logs api`):
+`webhook processed|duplicate|stale|ignored: event='evt_...' type='...' tenant='...'`, with the ids quoted (`%r`) so a newline in
+one cannot forge a second line. The edge logs its refusals (WARNING) and the charges route logs each bill (INFO). `LOG_LEVEL`
+(`DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`, any case; default `INFO`; `compose.yaml` passes it to the `api` service)
+sets how much of the `app.*` loggers is shown. A value that is not one of those falls back to `INFO` and logs a warning.
+
 ## Assumptions and limits
 These are known and not fixed; see also the two assumptions above (one customer per tenant, one subscription per tenant).
 - **A tenant is not bound to a Stripe customer.** A subscription event for tenant X overwrites X's stored customer id
