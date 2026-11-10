@@ -23,6 +23,11 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def in_grace(grace_until: datetime | None, at: datetime) -> bool:
+    """A past_due tenant is still allowed while `at` is no later than `grace_until`; no grace period means denied."""
+    return grace_until is not None and at <= grace_until
+
+
 def _deny(status_code: int, tenant_id: str | None, reason: str) -> HTTPException:
     log.warning("edge denied: tenant=%s status=%s reason=%s", tenant_id, status_code, reason)
     return HTTPException(status_code=status_code, detail=reason)
@@ -48,6 +53,6 @@ def require_entitlement(request: Request) -> str:
         raise _deny(402, tenant_id, "no entitlement")
     if row["status"] == "active":
         return tenant_id
-    if row["status"] == "past_due" and row["grace_until"] is not None and now() <= row["grace_until"]:
+    if row["status"] == "past_due" and in_grace(row["grace_until"], now()):
         return tenant_id
     raise _deny(402, tenant_id, f"not entitled: status {row['status']}")
