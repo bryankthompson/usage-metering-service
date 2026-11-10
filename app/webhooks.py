@@ -70,6 +70,10 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
+    if (event["type"] == "customer.subscription.deleted" and row and row["stripe_subscription_id"]
+            and row["stripe_subscription_id"] != sub.get("id")):
+        # The end of a replaced subscription must not cancel the current one ("stale" = recorded as handled, no change).
+        return "stale", tenant_id
     # A deleted subscription is canceled whatever status its payload carries (fail closed).
     status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(sub.get("status"), "canceled")
     items = (sub.get("items") or {}).get("data") or [{}]

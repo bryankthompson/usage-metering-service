@@ -272,6 +272,14 @@ def test_subscription_deleted_cancels_whatever_status_the_payload_carries(client
     assert resp.json() == {"status": "processed"} and row(conn)["status"] == "canceled"
 
 
+def test_deleting_a_replaced_subscription_does_not_cancel_the_current_one(client, conn):
+    post(client, subscription_event("evt_1", T, sub_id="sub_new"))
+    resp = post(client, subscription_event("evt_2", T + 10, status="canceled", sub_id="sub_old",
+                                           event_type="customer.subscription.deleted"))
+    assert resp.json() == {"status": "stale"}
+    assert row(conn)["status"] == "active" and row(conn)["stripe_subscription_id"] == "sub_new"
+
+
 def test_an_older_failure_after_a_newer_past_due_opens_one_window_and_a_later_older_one_does_not_move_it(client, conn):
     post(client, subscription_event("evt_1", T + 200, status="active"))
     post(client, subscription_event("evt_2", T + 400, status="past_due"))     # past_due, no window yet
