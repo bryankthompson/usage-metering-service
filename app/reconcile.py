@@ -63,6 +63,8 @@ def read_actuals(path: str) -> dict[tuple[str, str, datetime], tuple[int, int]]:
             lines = f.read().splitlines()
     except OSError as e:
         raise BadInput(f"cannot read {path}: {e.strerror}") from None
+    except UnicodeDecodeError:
+        raise BadInput(f"{path}: not valid UTF-8") from None
     for number, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -155,9 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.tolerance_bps < 0:
             raise BadInput("--tolerance-bps must be 0 or more")
-        only = parse_hour(args.hour, "--hour") if args.hour else None
-        since = parse_time(args.since, "--since") if args.since else None
-        actuals = read_actuals(args.actuals) if args.actuals else None
+        only = parse_hour(args.hour, "--hour") if args.hour is not None else None
+        since = parse_time(args.since, "--since") if args.since is not None else None
+        actuals = read_actuals(args.actuals) if args.actuals is not None else None
     except BadInput as e:
         print(f"reconcile: {e}", file=sys.stderr)
         return 2
