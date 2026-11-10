@@ -10,9 +10,10 @@ piece merges.
 ## Run it
 
 ```bash
-docker compose up -d db
-DATABASE_URL=postgresql://metering:metering@localhost:5432/metering uv run pytest -q
+scripts/test          # starts a throwaway Postgres 16 in docker if needed, then runs pytest
 ```
+
+With your own database: `DATABASE_URL=postgresql://... uv run pytest -q`.
 
 ## Layout
 
