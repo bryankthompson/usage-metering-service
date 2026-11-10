@@ -17,6 +17,10 @@ from app.rollup import lock_hour_shared
 log = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
+# Per-event token ceiling: far above any real call, and low enough that no sum of events overflows the
+# BIGINT rollup columns. A larger number is a 422 instead of a database error.
+MAX_TOKENS = 10**12
+
 # One statement does the dedupe and the late check. ON CONFLICT DO NOTHING makes two identical
 # requests race safely (one inserts, the other gets no row back). `late` is true when the event's
 # UTC hour is already in closed_hours; date_trunc takes 'UTC' so the session time zone cannot move
@@ -40,8 +44,8 @@ class UsageEvent(BaseModel):
     tenant_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1)
-    tokens_in: StrictInt = Field(ge=0)
-    tokens_out: StrictInt = Field(ge=0)
+    tokens_in: StrictInt = Field(ge=0, le=MAX_TOKENS)
+    tokens_out: StrictInt = Field(ge=0, le=MAX_TOKENS)
     occurred_at: AwareDatetime  # a naive timestamp is a 422
 
 
