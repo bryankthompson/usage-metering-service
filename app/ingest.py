@@ -17,8 +17,8 @@ from app.rollup import lock_hour_shared
 log = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
-# Per-event token ceiling: far above any real call, and low enough that no sum of events overflows the
-# BIGINT rollup columns. A larger number is a 422 instead of a database error.
+# Per-event token ceiling: far above any real call. A larger number is a 422 instead of a database error.
+# It does not bound a sum of events: see "Known limit" in docs/ingest.md.
 MAX_TOKENS = 10**12
 
 # One statement does the dedupe and the late check. ON CONFLICT DO NOTHING makes two identical

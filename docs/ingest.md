@@ -55,3 +55,9 @@ Compose runs it as the `rollup` service (`--every 3600`).
 check the other side waits.
 
 **Does not do:** reconciliation, pushing usage to Stripe, a query API over rollups, a queue.
+
+**Known limit:** the rollup token columns are BIGINT. If one tenant's events for one model in one UTC hour
+(taken from the client's `occurred_at`, so not necessarily the current hour) sum past 9.2e18 tokens, which is
+9,223,373 events at the 10^12 per-event cap, closing that hour fails with `bigint out of range`, rolls back, and
+`python -m app.rollup` exits non-zero. Compose restarts the service, so it fails again, loudly, and no later hour
+closes until the columns are widened to NUMERIC.

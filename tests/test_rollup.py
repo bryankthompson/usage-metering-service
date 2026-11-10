@@ -269,3 +269,11 @@ def test_every_runs_again_after_each_sleep(conn, monkeypatch, capsys):
         rollup.main(["--every", "3600"])
     assert sleeps == [3600, 3600]
     assert capsys.readouterr().out.count("nothing due") == 2  # one run at start, one after the first sleep
+
+
+@pytest.mark.parametrize("every", ["0", "-1"])
+def test_every_must_be_positive(every, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        rollup.main(["--every", every])
+    assert exit_info.value.code == 2
+    assert "positive" in capsys.readouterr().err

@@ -33,3 +33,4 @@ services:
       db:
         condition: service_healthy
     command: ["python", "-m", "app.rollup", "--every", "3600"]
+    restart: unless-stopped
