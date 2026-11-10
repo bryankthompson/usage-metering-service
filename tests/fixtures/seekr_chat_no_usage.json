@@ -1,0 +1,2 @@
+{"id": "chatcmpl-hand-0005", "object": "chat.completion", "created": 1783678140, "model": "meta-llama/Llama-3.1-8B-Instruct",
+ "choices": [{"index": 0, "message": {"role": "assistant", "content": "No usage here."}, "finish_reason": "stop"}]}
