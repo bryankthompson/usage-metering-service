@@ -15,6 +15,7 @@
     docker compose up -d --build
     scripts/demo.sh
 
+Give the api a few seconds to start: `FAIL step 3: expected 200, got 000` means it was not listening yet, so run the script again.
 The API port is `API_PORT` (default 8000); the api and db ports listen on 127.0.0.1 only. Expected last lines: the
 charges JSON with `"total_micros": 6000`, then `demo ok`. Any unexpected status or value prints `FAIL step N:
 expected X, got Y` with the body and exits non-zero.
@@ -23,6 +24,10 @@ expected X, got Y` with the body and exits non-zero.
 The schema is created by mounting `./db` into the db container's `/docker-entrypoint-initdb.d`. Postgres runs
 those files only when the data volume is first created: an existing volume is NOT re-initialised.
 `docker compose down -v` deletes the volume and resets it.
+If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept and
+not repaired: the demo then fails in its first steps (`relation ... does not exist`, or `FAIL step 3: expected 200,
+got 500`) and the rollup container restarts in a loop. Run `docker compose down -v` (it deletes the demo data) and
+start again.
 
 ## What it does not do
 
