@@ -42,9 +42,11 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 - `customer.subscription.created`, `.updated` and `.deleted` write the tenant's entitlement row, keyed by
   `subscription.metadata.tenant_id`: `active` and `trialing` become `active` (clearing any failure and grace
   period), `past_due` becomes `past_due` and keeps an existing grace period, any other Stripe status becomes
-  `canceled`.
-- `invoice.payment_failed` sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) from the
-  event time. It does not reopen a `canceled` tenant.
+  `canceled`, and `.deleted` is always `canceled`.
+- `invoice.payment_failed` sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
+  from the first failure: Stripe's retries of the same failed invoice do not extend it, and an `active`
+  subscription event clears it. It does not reopen a `canceled` tenant. A `GRACE_PERIOD_HOURS` that is not an
+  integer from 0 to 8760 makes this event **503**.
 - Each event id is stored in the same transaction as its change: a redelivery is **200** `duplicate`. An event
   older than the last one applied does not overwrite newer state (`stale`). Unknown tenants and unhandled event types
   are `ignored`. All answers are 200 `{"status": ...}`.
@@ -69,6 +71,9 @@ Any database error: **503**, never allowed.
 docker compose up     # Postgres 16, the API on :8000 and the hourly rollup service
 scripts/test          # runs the tests against a throwaway Postgres 16 in docker
 ```
+
+Postgres applies the files in `db/` only when its data volume is first created. If a volume already exists
+from an earlier run, run `docker compose down -v` once to start clean.
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`. To test against your own database:
