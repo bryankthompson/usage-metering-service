@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS entitlements (
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Upgrade for databases created before last_event_at existed.
+ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
+
 -- One row per Stripe event handled: a redelivered webhook changes nothing the second time.
 CREATE TABLE IF NOT EXISTS stripe_events (
     event_id    TEXT PRIMARY KEY,

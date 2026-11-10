@@ -29,7 +29,15 @@ async def raw_body(request: Request) -> bytes:
 
 
 def grace_hours() -> int:
-    return int(os.environ.get("GRACE_PERIOD_HOURS", "72"))
+    raw = os.environ.get("GRACE_PERIOD_HOURS", "72")
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = -1
+    if not 0 <= hours <= 8760:
+        log.error("webhook refused: GRACE_PERIOD_HOURS=%r is not an integer from 0 to 8760", raw)
+        raise HTTPException(status_code=503, detail="grace period not configured")
+    return hours
 
 
 def verify(payload: bytes, signature: str | None) -> dict:
@@ -57,6 +65,8 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     tenant_id = (sub.get("metadata") or {}).get("tenant_id")
     if not tenant_id:
         return "ignored", None
+    # Serialize per tenant even when no row exists yet, so a concurrent first insert cannot be overwritten by an older event.
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (tenant_id,))
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
@@ -86,6 +96,12 @@ def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: dateti
         return "ignored", None
     tenant_id = row["tenant_id"]
     if row["last_event_at"] and created < row["last_event_at"]:
+        if row["status"] == "past_due" and row["grace_until"] is None:
+            # A newer past_due subscription event arrived first: the older invoice failure still opens the grace window.
+            conn.execute(
+                "UPDATE entitlements SET payment_failed_at = %s, grace_until = %s, updated_at = now() WHERE tenant_id = %s",
+                (created, created + timedelta(hours=grace_hours()), tenant_id))
+            return "processed", tenant_id
         return "stale", tenant_id
     if row["status"] == "canceled":
         # A failed payment must not reopen access: only a subscription event can make a tenant active again.
@@ -102,6 +118,15 @@ HANDLERS = {"invoice.payment_failed": _apply_payment_failed, **{name: _apply_sub
 
 def handle_event(conn: psycopg.Connection, event: dict) -> str:
     """Apply one verified event in the open transaction and return its outcome. The caller commits or rolls back."""
+    try:
+        if not isinstance(event["id"], str) or not isinstance(event["type"], str):
+            raise TypeError("event id and type must be strings")
+        if not isinstance(event["data"]["object"], dict):
+            raise TypeError("event data.object must be an object")
+        created = datetime.fromtimestamp(event["created"], tz=timezone.utc)
+    except (KeyError, TypeError, ValueError, OverflowError, OSError) as err:
+        log.warning("webhook refused: malformed event: %r", err)
+        raise HTTPException(status_code=400, detail="malformed event") from err
     handler = HANDLERS.get(event["type"])
     if handler is None:
         log.info("webhook ignored: event=%s type=%s is not handled", event["id"], event["type"])
@@ -112,7 +137,6 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
     if inserted is None:
         log.info("webhook duplicate: event=%s type=%s", event["id"], event["type"])
         return "duplicate"
-    created = datetime.fromtimestamp(event["created"], tz=timezone.utc)
     outcome, tenant_id = handler(conn, event, created)
     log.info("webhook %s: event=%s type=%s tenant=%s", outcome, event["id"], event["type"], tenant_id)
     return outcome

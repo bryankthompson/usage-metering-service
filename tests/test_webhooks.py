@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -228,5 +229,16 @@ def test_a_failure_while_applying_leaves_no_event_record(conn, monkeypatch):
     safe_client = TestClient(app, raise_server_exceptions=False)
     post(safe_client, subscription_event("evt_1", T))
     resp = post(safe_client, payment_failed_event("evt_2", T + 100))
-    assert resp.status_code == 500
+    assert resp.status_code == 503
     assert count(conn, "stripe_events") == 1 and row(conn)["status"] == "active"
+
+
+def test_a_signed_event_missing_fields_is_a_400(client):
+    resp = post(client, json.dumps({"id": "evt_bad", "type": "customer.subscription.updated", "created": T}).encode())
+    assert resp.status_code == 400
+
+
+def test_an_older_invoice_failure_fills_a_missing_grace_window(client, conn):
+    post(client, subscription_event("evt_1", T + 100, status="past_due"))
+    resp = post(client, payment_failed_event("evt_2", T))
+    assert resp.json() == {"status": "processed"} and row(conn)["grace_until"] is not None
