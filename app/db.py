@@ -1,4 +1,4 @@
-"""Postgres access: plain SQL through psycopg, one connection per request."""
+"""Postgres access: plain SQL through psycopg. Each caller opens and closes its own connection."""
 import os
 from collections.abc import Iterator
 from pathlib import Path

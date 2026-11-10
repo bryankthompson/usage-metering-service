@@ -1,7 +1,7 @@
 # Usage intake: `POST /v1/usage`
 
-Stores one usage event in the append-only `usage_events` table (`db/001_usage.sql`), behind the edge
-check `require_entitlement` and one database connection per request.
+Stores one usage event in the append-only `usage_events` table (`db/001_usage.sql`) behind the edge check
+`require_entitlement`, which reads the entitlement on its own connection (the handler uses a second one).
 
 Body, all fields required: `tenant_id`, `idempotency_key` (1 to 200 chars), `model` (non-empty),
 `tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 with a time zone).
@@ -12,6 +12,7 @@ Body, all fields required: `tenant_id`, `idempotency_key` (1 to 200 chars), `mod
 | 200 `{"status": "duplicate", "event_id": N}` | same `(tenant_id, idempotency_key)`, same payload; nothing stored |
 | 409 | same key, different `model`, tokens or `occurred_at`; nothing stored |
 | 403 | body `tenant_id` is not the tenant the edge admitted |
+| 401 / 402 / 503 | the edge refused, nothing stored: no `X-Tenant-Id` header / no usable entitlement / entitlement check failed (see `docs/billing.md`) |
 | 422 | invalid body, including a naive timestamp |
 
 ## How it stays correct
@@ -24,8 +25,7 @@ Body, all fields required: `tenant_id`, `idempotency_key` (1 to 200 chars), `mod
   the hour). A late event is stored and answered 201. Before the INSERT, ingest takes a shared lock
   for the event's hour (see Rollups).
 
-**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py` (set `DATABASE_URL`
-if the database is not on port 5432).
+**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py` (`DATABASE_URL` if not port 5432).
 
 **Does not do:** batch intake, or authentication beyond the edge dependency.
 
