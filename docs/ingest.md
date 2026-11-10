@@ -39,7 +39,7 @@ same hour changes nothing and returns `None`. `hour_start` must be a timezone-aw
 `close_due_hours(conn, now, grace=5 min)` closes, oldest first, every unclosed hour that has events
 and ended at least `grace` before `now`. An hour with no events is not closed.
 
-**Never both, never neither.** Each event is in its hour's closed rollup or flagged `late`. Ingest
+**Never both, never neither.** Each event of a closed hour is in its closed rollup or flagged `late`. Ingest
 takes the shared advisory lock `pg_advisory_xact_lock_shared(1, hour)` before its INSERT and holds it
 to commit; `close_hour` takes the exclusive lock for the hour before it reads anything.
 - An ingest already in flight finishes first, so the close counts its event (`late = false`).

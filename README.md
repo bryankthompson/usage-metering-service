@@ -23,8 +23,8 @@ closes every hour that has events and ended at least 5 minutes ago (`--every SEC
 it hourly as the `rollup` service). Late and duplicate events never change a closed hour: an event whose
 UTC hour is already closed is stored with `late = true` and answered 201 like any other, but it is left out
 of the rollup, so it is never charged. Ingest takes a shared advisory lock on the event's hour and closing
-takes the exclusive one, so every event is either in the closed rollup or flagged late, never both and
-never neither. Details and the known limit: [docs/ingest.md](docs/ingest.md).
+takes the exclusive one, so every event of a closed hour is either in its closed rollup or flagged late,
+never both and never neither. Details and the known limit: [docs/ingest.md](docs/ingest.md).
 
 **4. Versioned prices in micro-USD.** `app/pricing.py`. Each model has numbered price versions with an
 `effective_from` and two integer prices, micro-USD per 1,000 input and per 1,000 output tokens (1 USD =
@@ -46,8 +46,9 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
   subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one.
 - `invoice.payment_failed` sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
   from the first failure: Stripe's retries of the same failed invoice do not extend it, and an `active`
-  subscription event clears it. It does not reopen a `canceled` tenant. A `GRACE_PERIOD_HOURS` that is not an
-  integer from 0 to 8760 makes this event **503**.
+  subscription event clears it. It does not reopen a `canceled` tenant. If `GRACE_PERIOD_HOURS` is not an
+  integer from 0 to 8760, a failure that has to open a grace window is **503** and not recorded, so Stripe
+  retries it; other events are unaffected.
 - Each event id is stored in the same transaction as its change: a redelivery is **200** `duplicate`. An event
   older than the last one applied does not overwrite newer state (`stale`). Unknown tenants and unhandled event types
   are `ignored`. All answers are 200 `{"status": ...}`.
