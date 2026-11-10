@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app import ingest, webhooks
+from app import ingest, pricing, webhooks
 
 
 def create_app() -> FastAPI:
@@ -12,6 +12,7 @@ def create_app() -> FastAPI:
 
     app.include_router(ingest.router)
     app.include_router(webhooks.router)
+    app.include_router(pricing.router)
     return app
 
 

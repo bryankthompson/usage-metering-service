@@ -10,6 +10,18 @@ CREATE TABLE IF NOT EXISTS price_versions (
     PRIMARY KEY (model, version)
 );
 
+-- A new price is a new version: a stored version is never changed or removed, so a past charge can be rebuilt.
+CREATE OR REPLACE FUNCTION price_versions_immutable() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'price_versions is append-only: add a new version instead';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS price_versions_no_change ON price_versions;
+CREATE TRIGGER price_versions_no_change
+    BEFORE UPDATE OR DELETE ON price_versions
+    FOR EACH ROW EXECUTE FUNCTION price_versions_immutable();
+
 CREATE TABLE IF NOT EXISTS entitlements (
     tenant_id              TEXT PRIMARY KEY,
     stripe_customer_id     TEXT,
