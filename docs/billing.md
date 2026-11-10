@@ -100,6 +100,12 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
   database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
   turn into 503; not tested under load.
+- **A cancel for an entitlement row with an unusable id is ignored.** The webhook refuses a tenant id over 200 characters or
+  with control characters or edge whitespace, for a cancel too. The app cannot create such a row (the same rule refuses it),
+  so only a row inserted by hand is affected, and it would stay as it is. Found in review, not fixed.
+- **`LOG_LEVEL` does not override a handler that is already installed.** `configure_logging` sets the level of the `app`
+  logger, but a root handler with its own stricter level, installed before the app starts, still filters the lines. Under
+  `docker compose` no such handler exists. Found in review, not fixed.
 
 Tests: `uv run pytest -q tests/test_webhooks.py tests/test_edge.py` (signed with a fake `whsec_test_...` secret).
 The adversarial set is `tests/test_attack_webhooks.py`, `tests/test_attack_billing.py` and `tests/test_attack_db_outage.py`.

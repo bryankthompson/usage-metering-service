@@ -119,9 +119,11 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
     models = sorted({row["model"] for row in rows})
     loaded: dict[str, list[dict]] = {model: [] for model in models}
     if models:
+        # A version effective after the last hour in range can never apply, so it is not loaded (nor decoded).
         for v in conn.execute(
                 "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
-                " WHERE model = ANY(%s) ORDER BY effective_from, version", (models,)):
+                " WHERE model = ANY(%s) AND effective_from <= %s ORDER BY effective_from, version",
+                (models, rows[-1]["hour_start"])):
             loaded[v["model"]].append(v)
     keys = {model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()}
     lines = []

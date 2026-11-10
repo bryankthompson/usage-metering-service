@@ -375,3 +375,14 @@ def test_every_iso_spelling_still_gives_the_same_bill(client, conn):
                  ("2026-10-31T19:00:00-05:00", "2026-10-31T20:00:00-05:00"), ("2026-11-01 00:00:00Z", "2026-11-01 01:00:00Z")]
     totals = {charges(client, "tenant-1", start=s, end=e).json()["total_micros"] for s, e in spellings}
     assert totals == {2000}
+
+
+def test_a_price_version_that_cannot_be_decoded_does_not_break_a_bill_for_a_past_hour(conn):
+    # Written by SQL (add_price_version cannot): 'infinity' has no Python datetime, so loading every version failed the bill.
+    add_price_version(conn, "m1", T0, 1000, 2000)
+    conn.execute("INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
+                 " VALUES ('m1', 2, 'infinity', 5, 5)")
+    conn.commit()
+    rollup(conn, "t1", "m1", T0, 1000, 1000)
+    lines, total = charge_lines(conn, "t1", T0, T0 + HOUR)
+    assert total == 3000 and [ln["price_version"] for ln in lines] == [1]
