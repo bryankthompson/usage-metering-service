@@ -4,7 +4,6 @@ POST /v1/usage stores one event in the append-only `usage_events` log. A resend 
 (tenant_id, idempotency_key) is counted once. The route sits behind `require_entitlement`.
 """
 import logging
-from collections.abc import Iterator
 from datetime import timezone
 from typing import Annotated
 
@@ -114,31 +113,21 @@ def _unavailable(err: psycopg.OperationalError) -> HTTPException:
     return HTTPException(status_code=503, detail="database unavailable")
 
 
-def usage_conn() -> Iterator[psycopg.Connection]:
-    """`get_conn`, except that a database that is down is a 503 (as at the edge), not a 500."""
-    try:
-        conn = db.connect()
-    except psycopg.OperationalError as err:
-        raise _unavailable(err) from err
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
 @router.post("/v1/usage", status_code=201)
 def ingest_usage(
     event: UsageEvent,
     response: Response,
     tenant: str = Depends(require_entitlement),
-    conn: psycopg.Connection = Depends(usage_conn),
 ) -> dict[str, str | int | bool]:
     if event.tenant_id != tenant:
         log.warning("usage rejected: body tenant %r is not the entitled tenant %r", event.tenant_id, tenant)
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
     try:
-        return _store(event, response, tenant, conn)
-    except psycopg.OperationalError as err:  # the connection dropped part way: the same key is safe to resend
+        # Opened here, not in a dependency: a dependency's connection stays open while the request waits for a
+        # free worker thread, so a burst of requests used up Postgres's connection slots.
+        with db.connect() as conn:
+            return _store(event, response, tenant, conn)
+    except psycopg.OperationalError as err:  # database down or dropped part way: the same key is safe to resend
         raise _unavailable(err) from err
 
 
