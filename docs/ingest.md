@@ -1,9 +1,10 @@
 # Usage intake: `POST /v1/usage`
 
-Stores one usage event in the append-only `usage_events` table (`db/001_usage.sql`) behind the edge check
-`require_entitlement`, which reads the entitlement on its own connection (the handler uses a second one).
+Stores one usage event in the `usage_events` table (`db/001_usage.sql`; a trigger refuses UPDATE and DELETE, but
+not TRUNCATE or the table owner) behind the edge check `require_entitlement`, which reads the entitlement on its own
+connection (the handler uses a second one).
 
-Body (all required): `tenant_id`, `idempotency_key` (1 to 200 chars), `model`, `tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 with a time zone).
+Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars each, no NUL character), `tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 text with a time zone, UTC year 1 to 9999; a number is refused, not read as Unix seconds). The 200-char cap keeps these columns inside Postgres's index key limit: an oversized `model` would be stored and then stop the rollup from closing any later hour.
 
 | Status | When |
 |--|--|
@@ -12,7 +13,8 @@ Body (all required): `tenant_id`, `idempotency_key` (1 to 200 chars), `model`, `
 | 409 | same key, different `model`, tokens or `occurred_at`; nothing stored |
 | 403 | body `tenant_id` is not the tenant the edge admitted |
 | 401 / 402 / 503 | the edge refused, nothing stored: no `X-Tenant-Id` header / no usable entitlement / entitlement check failed (see `docs/billing.md`) |
-| 422 | invalid body, including a naive timestamp |
+| 503 | the database went away after the edge check: nothing is confirmed stored, and resending the same key is safe |
+| 422 | invalid body (naive or numeric timestamp, text too long or with a NUL, a count out of range). The body lists `type`, `loc` and `msg` only, never the input: echoing it made a `NaN` or a lone surrogate a 500 |
 
 ## How it stays correct
 
@@ -25,7 +27,7 @@ Body (all required): `tenant_id`, `idempotency_key` (1 to 200 chars), `model`, `
   line), is stored, and is never in a rollup, so it is **not billed**. Ingest first takes a shared lock
   for the event's hour (see Rollups).
 
-**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py` (`DATABASE_URL` if not port 5432).
+**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py tests/test_attack_ingest.py` (`DATABASE_URL` if not port 5432). The second file is the hostile-input, race and outage tests.
 
 **Does not do:** batch intake, or authentication beyond the edge dependency.
 
