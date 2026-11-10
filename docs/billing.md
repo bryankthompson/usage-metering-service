@@ -55,6 +55,9 @@ spacing it can be later than Stripe's first failure. A later older failure does 
 `GRACE_PERIOD_HOURS` must be an integer from 0 to 8760, otherwise the webhook answers 503 and the event is not
 recorded (Stripe retries). Assumption: one Stripe customer is one tenant; two tenants sharing a customer id would have
 invoice events applied to an arbitrary one, which is not handled.
+Assumption: one subscription per tenant. A `customer.subscription.deleted` for any subscription carrying the tenant's
+`metadata.tenant_id` cancels the tenant, so change a plan by updating the same subscription; with two live
+subscriptions, ending either denies the tenant (fail closed) until a newer subscription event for the other arrives.
 
 The edge (`require_entitlement`) reads tenant from the `X-Tenant-Id` header, a stand-in for real authentication.
 It opens its own database connection (one extra per request), so a database that is down answers 503 instead of 500.
