@@ -181,7 +181,11 @@ def sub_event_with(event_id: str, **sub_fields) -> bytes:
     return event(event_id, "customer.subscription.updated", int(time.time()), sub)
 
 
-@pytest.mark.parametrize("tenant_id", [123, True, ["tenant-1"], {"a": 1}, "", "a\u0000b", None])
+@pytest.mark.parametrize("tenant_id", [
+    123, True, ["tenant-1"], {"a": 1}, "", "a\u0000b", None,
+    " t", "t ", "\tt", "t\t", "  ", "a\nb", "a\rb", "a\x07b", "a\x7fb", "a\tb",       # what the edge could never match, and control characters
+    "x" * 201,                                                                       # over the 200 characters /v1/usage accepts
+    "\ud800", "a\ud800b"])                                                          # a lone surrogate cannot be stored
 def test_a_subscription_whose_tenant_id_is_not_usable_text_is_ignored(client, conn, tenant_id):
     resp = post(client, sub_event_with("evt_t", metadata={"tenant_id": tenant_id}))
     assert (resp.status_code, resp.json()) == (200, {"status": "ignored"})
@@ -195,7 +199,7 @@ def test_a_subscription_whose_metadata_is_not_an_object_is_ignored(client, conn,
     assert counts(conn) == (0, 0)
 
 
-@pytest.mark.parametrize("tenant_id", ["x" * 10_000, "テナント-é-😀", "x'; DROP TABLE entitlements; --", "Robert'); DELETE FROM usage_events;--"])
+@pytest.mark.parametrize("tenant_id", ["x" * 200, "テナント-é-😀", "a b", "ａｂｃ", "\u00a0nbsp\u00a0", "\u200bzwsp", "x'; DROP TABLE entitlements; --", "Robert'); DELETE FROM usage_events;--"])
 def test_odd_but_valid_tenant_ids_are_stored_exactly_and_the_tables_survive(client, conn, tenant_id):
     resp = post(client, sub_event_with("evt_odd", metadata={"tenant_id": tenant_id}))
     assert (resp.status_code, resp.json()) == (200, {"status": "processed"})
@@ -209,7 +213,8 @@ def test_odd_but_valid_tenant_ids_are_stored_exactly_and_the_tables_survive(clie
     {"items": {"data": [{"price": {"id": 5}}]}}, {"items": {"data": [{"price": {"id": "p\u0000"}}]}},
     {"status": ["active"]}, {"status": {"a": 1}}, {"status": None}, {"status": 5},
     {"customer": 123}, {"customer": {"a": 1}}, {"customer": "c\u0000x"}, {"customer": None},
-    {"id": 5}, {"id": "s\u0000"}, {"id": None}])
+    {"id": 5}, {"id": "s\u0000"}, {"id": None},
+    {"customer": "\ud800"}, {"id": "s\ud800"}, {"items": {"data": [{"price": {"id": "p\ud800"}}]}}])
 def test_odd_subscription_fields_never_make_a_500(client, conn, fields):
     resp = post(client, sub_event_with("evt_f", **fields))
     assert resp.status_code == 200, resp.text
@@ -219,7 +224,7 @@ def test_odd_subscription_fields_never_make_a_500(client, conn, fields):
         assert row["status"] == "canceled"                    # an unreadable status is never access
 
 
-@pytest.mark.parametrize("customer", [123, {"a": 1}, ["cus_1"], "c\u0000x", None, "", True])
+@pytest.mark.parametrize("customer", [123, {"a": 1}, ["cus_1"], "c\u0000x", None, "", True, "\ud800", "c\ud800"])
 def test_payment_failed_with_an_unusable_customer_is_ignored(client, conn, customer):
     payload = event("evt_pf", "invoice.payment_failed", int(time.time()), {"id": "in_1", "customer": customer})
     resp = post(client, payload)
@@ -227,8 +232,9 @@ def test_payment_failed_with_an_unusable_customer_is_ignored(client, conn, custo
     assert counts(conn) == (0, 0)
 
 
-def test_an_event_id_with_a_nul_byte_is_400(client, conn):
-    payload = event("evt_\u0000", "customer.subscription.updated", int(time.time()), {"metadata": {"tenant_id": "t"}})
+@pytest.mark.parametrize("event_id", ["evt_\u0000", "evt_\ud800"])
+def test_an_event_id_that_cannot_be_stored_is_400(client, conn, event_id):
+    payload = event(event_id, "customer.subscription.updated", int(time.time()), {"metadata": {"tenant_id": "t"}})
     assert post(client, payload).status_code == 400
     assert counts(conn) == (0, 0)
 
@@ -329,3 +335,23 @@ def test_signature_headers_with_odd_bytes_are_400_never_a_500(client, conn, head
     resp = client.post(URL, content=fresh_event(), headers={"Stripe-Signature": header})
     assert resp.status_code == 400
     assert counts(conn) == (0, 0)
+
+
+# --- a tenant id or event id with a newline must not forge a log line ---
+
+def test_odd_ids_are_logged_as_repr_so_one_event_is_one_log_line(client, conn, caplog):
+    caplog.set_level("INFO")
+    post(client, subscription_event("evt_a\nFORGED webhook processed: tenant=admin", int(time.time()), tenant_id="tenant-1"))
+    post(client, subscription_event("evt_b", int(time.time()), tenant_id="bad\nFORGED edge denied: tenant=admin"))
+    post(client, event("evt_c\nFORGED", "invoice.unknown\nFORGED", int(time.time()), {}))
+    lines = [r.getMessage() for r in caplog.records if r.name.startswith("app.")]
+    assert lines and not [m for m in lines if "\n" in m], [m for m in lines if "\n" in m]
+    assert any("tenant_id" in m and "is not usable" in m for m in lines)          # the refusal is logged, not silent
+
+
+def test_a_tenant_id_at_the_limit_is_stored_and_one_over_is_ignored_and_logged(client, conn, caplog):
+    caplog.set_level("INFO")
+    assert post(client, sub_event_with("evt_200", metadata={"tenant_id": "t" * 200})).json() == {"status": "processed"}
+    assert post(client, sub_event_with("evt_201", metadata={"tenant_id": "t" * 201})).json() == {"status": "ignored"}
+    assert [r["tenant_id"] for r in conn.execute("SELECT tenant_id FROM entitlements").fetchall()] == ["t" * 200]
+    assert "is not usable" in caplog.text

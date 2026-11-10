@@ -29,7 +29,7 @@ def in_grace(grace_until: datetime | None, at: datetime) -> bool:
 
 
 def _deny(status_code: int, tenant_id: str | None, reason: str) -> HTTPException:
-    log.warning("edge denied: tenant=%s status=%s reason=%s", tenant_id, status_code, reason)
+    log.warning("edge denied: tenant=%r status=%s reason=%s", tenant_id, status_code, reason)
     return HTTPException(status_code=status_code, detail=reason)
 
 

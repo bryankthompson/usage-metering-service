@@ -352,3 +352,26 @@ def test_hostile_path_tenants_are_403_never_a_500(client, conn, path):
     entitle(conn, "tenant-1")
     resp = client.get(path + "?" + "&".join(f"{k}={v}" for k, v in RANGE.items()), headers={"X-Tenant-Id": "tenant-1"})
     assert resp.status_code == 403, resp.text
+
+
+# --- start and end are ISO 8601 text, never Unix seconds ---
+
+@pytest.mark.parametrize("value", ["5", "0", "-5", "1762770600", "1762770600.5", "1e9", "20261101", "+5", " 5", "٥"])
+@pytest.mark.parametrize("which", ["start", "end"])
+def test_a_bare_number_is_not_a_time(client, conn, which, value):
+    entitle(conn, "tenant-1")
+    params = {"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z", which: value}
+    resp = client.get("/v1/tenants/tenant-1/charges", params=params, headers={"X-Tenant-Id": "tenant-1"})
+    assert resp.status_code == 422, resp.text
+    assert "ISO 8601" in resp.text
+
+
+def test_every_iso_spelling_still_gives_the_same_bill(client, conn):
+    add_price_version(conn, "m1", T0, 1000, 2000)
+    entitle(conn, "tenant-1")
+    rollup(conn, "tenant-1", "m1", T0, 1000, 500)
+    spellings = [("2026-11-01T00:00:00Z", "2026-11-01T01:00:00Z"), ("2026-11-01T00:00:00+00:00", "2026-11-01T01:00:00+00:00"),
+                 ("2026-11-01T00:00:00.000000Z", "2026-11-01T01:00:00.0Z"), ("2026-11-01T02:00:00+02:00", "2026-11-01T03:00:00+02:00"),
+                 ("2026-10-31T19:00:00-05:00", "2026-10-31T20:00:00-05:00"), ("2026-11-01 00:00:00Z", "2026-11-01 01:00:00Z")]
+    totals = {charges(client, "tenant-1", start=s, end=e).json()["total_micros"] for s, e in spellings}
+    assert totals == {2000}

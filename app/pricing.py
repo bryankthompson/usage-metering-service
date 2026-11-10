@@ -8,11 +8,15 @@ Prices are per model and versioned: a new price is a new row, a stored version i
 charge for a past hour is rated with the price that applied then.
 """
 import logging
+import re
 from bisect import bisect_right
 from datetime import datetime
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BeforeValidator
+from pydantic_core import PydanticCustomError
 
 from app.db import get_conn
 from app.edge import require_entitlement
@@ -53,7 +57,7 @@ def add_price_version(conn: psycopg.Connection, model: str, effective_from: date
         " RETURNING version",
         (model, effective_from, input_micros_per_1k, output_micros_per_1k, model)).fetchone()
     conn.commit()
-    log.info("price version added: model=%s version=%s effective_from=%s in=%s out=%s",
+    log.info("price version added: model=%r version=%s effective_from=%s in=%s out=%s",
              model, row["version"], effective_from.isoformat(), input_micros_per_1k, output_micros_per_1k)
     return row["version"]
 
@@ -133,13 +137,27 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
             "micros": _rate(version, row["tokens_in"], row["tokens_out"]),
         })
     total = sum(line["micros"] for line in lines)
-    log.info("charges computed: tenant=%s start=%s end=%s lines=%d total_micros=%d",
+    log.info("charges computed: tenant=%r start=%s end=%s lines=%d total_micros=%d",
              tenant_id, start.isoformat(), end.isoformat(), len(lines), total)
     return lines, total
 
 
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _iso_text(value: object) -> object:
+    """Only ISO 8601 text: a bare number is read as Unix seconds by the datetime parser (`?start=5` is 1970), and a
+    caller who sends one almost certainly meant something else. Every spelling that starts YYYY-MM-DD passes unchanged."""
+    if not isinstance(value, str) or not ISO_DATE.match(value):
+        raise PydanticCustomError("iso_datetime", "must be ISO 8601 text with a time zone, such as 2026-11-01T00:00:00Z")
+    return value
+
+
+IsoDatetime = Annotated[datetime, BeforeValidator(_iso_text)]
+
+
 @router.get("/v1/tenants/{tenant_id}/charges")
-def get_charges(tenant_id: str, start: datetime, end: datetime,
+def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime,
                 caller: str = Depends(require_entitlement),
                 conn: psycopg.Connection = Depends(get_conn)) -> dict:
     if caller != tenant_id:
