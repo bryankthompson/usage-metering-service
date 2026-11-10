@@ -30,8 +30,12 @@ CREATE TABLE IF NOT EXISTS entitlements (
     status                 TEXT        NOT NULL,   -- active | past_due | canceled
     payment_failed_at      TIMESTAMPTZ,
     grace_until            TIMESTAMPTZ,
+    last_event_at          TIMESTAMPTZ,            -- `created` of the newest Stripe event applied: older events never overwrite
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Upgrade for databases created before last_event_at existed.
+ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
 
 -- One row per Stripe event handled: a redelivered webhook changes nothing the second time.
 CREATE TABLE IF NOT EXISTS stripe_events (
