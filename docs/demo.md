@@ -1,7 +1,6 @@
 # End-to-end demo
 
-`scripts/demo.sh` drives a running compose stack with curl and proves the whole path:
-price -> entitlement -> usage -> rollup -> charges.
+`scripts/demo.sh` drives a running compose stack with curl: price -> entitlement -> usage -> rollup -> charges.
 1. Picks the latest UTC hour (2 to 200 hours back) that is not in `closed_hours`, so it can run again on the same stack.
 2. Inserts a price version for `demo-model` (1500 micros per 1k tokens in, 3000 out).
 3. Sends a locally signed `customer.subscription.updated` event to `/v1/stripe/webhook` (expects 200 `processed`).
@@ -16,8 +15,9 @@ price -> entitlement -> usage -> rollup -> charges.
     docker compose up -d --build
     scripts/demo.sh
 
-The API port is `API_PORT` (default 8000). Expected last lines: the charges JSON with `"total_micros": 6000`, then `demo ok`.
-Any unexpected status or value prints `FAIL step N: expected X, got Y` with the body and exits non-zero.
+The API port is `API_PORT` (default 8000); the api and db ports listen on 127.0.0.1 only. Expected last lines: the
+charges JSON with `"total_micros": 6000`, then `demo ok`. Any unexpected status or value prints `FAIL step N:
+expected X, got Y` with the body and exits non-zero.
 
 ## The database
 The schema is created by mounting `./db` into the db container's `/docker-entrypoint-initdb.d`. Postgres runs

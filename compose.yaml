@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: metering
       POSTGRES_DB: metering
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       # Postgres runs db/*.sql in filename order the first time the data volume is created.
       - ./db:/docker-entrypoint-initdb.d:ro
@@ -22,7 +22,7 @@ services:
       DATABASE_URL: postgresql://metering:metering@db:5432/metering
       STRIPE_WEBHOOK_SECRET: whsec_test_only_not_a_real_secret
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
