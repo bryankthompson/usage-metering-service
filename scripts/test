@@ -14,6 +14,10 @@ if [ -z "${DATABASE_URL:-}" ]; then
       -e POSTGRES_DB=metering -p "127.0.0.1:$PORT:5432" postgres:16 >/dev/null
     echo "started $NAME on port $PORT"
   fi
+  if docker port "$NAME" 5432/tcp | grep -qv '^127\.0\.0\.1:'; then
+    echo "$NAME publishes its port beyond loopback (older container); run: docker rm -f $NAME, then rerun" >&2
+    exit 1
+  fi
   until docker exec "$NAME" pg_isready -U metering -h 127.0.0.1 >/dev/null 2>&1; do sleep 1; done
   DB="metering_$(pwd | md5sum | cut -c1-8)"
   if ! docker exec "$NAME" psql -U metering -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB'" | grep -q 1; then
