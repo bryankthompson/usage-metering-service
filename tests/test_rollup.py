@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import psycopg.conninfo
 import pytest
 from fastapi.testclient import TestClient
 
@@ -127,16 +128,57 @@ def test_late_and_duplicate_events_never_change_a_closed_rollup(client, conn):
     assert rollups(conn) == closed
 
 
+def waiting_for_advisory_lock(watcher):
+    """How many sessions in THIS database wait for an advisory lock. pg_locks is cluster-wide and scripts/test
+    puts every checkout in one Postgres, so a waiter in another database must not count."""
+    waiting = watcher.execute(
+        "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+        " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())").fetchone()["n"]
+    watcher.commit()
+    return waiting
+
+
 def wait_until_blocked(watcher):
-    """Wait until some session is waiting for an advisory lock."""
+    """Wait until some session in this database is waiting for an advisory lock."""
     for _ in range(500):
-        waiting = watcher.execute(
-            "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").fetchone()["n"]
-        watcher.commit()
-        if waiting:
+        if waiting_for_advisory_lock(watcher):
             return
         time.sleep(0.01)
     pytest.fail("nothing is waiting for the hour lock")
+
+
+def test_the_lock_wait_check_counts_this_database_only(conn):
+    other_url = psycopg.conninfo.make_conninfo(db.database_url(), dbname="postgres")
+    sessions = {name: psycopg.connect(url) for name, url in (
+        ("foreign_holder", other_url), ("foreign_waiter", other_url),
+        ("local_holder", db.database_url()), ("local_waiter", db.database_url()))}
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        for name in ("foreign_holder", "local_holder"):
+            sessions[name].execute("SELECT pg_advisory_xact_lock(9, 9)")  # the same key, in two databases
+        for name in ("foreign_waiter", "local_waiter"):
+            sessions[name].execute("SET lock_timeout = '10s'")  # a failing test must not hang
+        pool.submit(sessions["foreign_waiter"].execute, "SELECT pg_advisory_xact_lock(9, 9)")
+        for _ in range(500):  # wait until the foreign waiter is really waiting (pg_locks, all databases)
+            everywhere = conn.execute(
+                "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").fetchone()["n"]
+            conn.commit()
+            if everywhere:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("the waiter in the other database never started waiting")
+        assert waiting_for_advisory_lock(conn) == 0  # a waiter in another database does not count
+
+        pool.submit(sessions["local_waiter"].execute, "SELECT pg_advisory_xact_lock(9, 9)")
+        wait_until_blocked(conn)
+        assert waiting_for_advisory_lock(conn) == 1  # the local waiter counts, the foreign one still does not
+    finally:
+        for name in ("foreign_holder", "local_holder"):
+            sessions[name].rollback()  # release, so the waiters finish before the pool shuts down
+        pool.shutdown(wait=True)
+        for session in sessions.values():
+            session.close()
 
 
 def test_an_event_that_arrives_while_the_hour_is_closing_is_late(client, conn):

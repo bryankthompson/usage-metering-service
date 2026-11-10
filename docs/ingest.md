@@ -1,31 +1,31 @@
 # Usage intake: `POST /v1/usage`
 
-Stores one usage event in the append-only `usage_events` table (`db/001_usage.sql`), behind the edge
-check `require_entitlement` and one database connection per request.
+Stores one usage event in the append-only `usage_events` table (`db/001_usage.sql`) behind the edge check
+`require_entitlement`, which reads the entitlement on its own connection (the handler uses a second one).
 
-Body, all fields required: `tenant_id`, `idempotency_key` (1 to 200 chars), `model` (non-empty),
-`tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 with a time zone).
+Body (all required): `tenant_id`, `idempotency_key` (1 to 200 chars), `model`, `tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 with a time zone).
 
 | Status | When |
 |--|--|
-| 201 `{"status": "accepted", "event_id": N}` | new event stored |
-| 200 `{"status": "duplicate", "event_id": N}` | same `(tenant_id, idempotency_key)`, same payload; nothing stored |
+| 201 `{"status": "accepted", "event_id": N, "late": false}` | new event stored |
+| 200 `{"status": "duplicate", "event_id": N, "late": false}` | same key and payload as a stored event; nothing stored |
 | 409 | same key, different `model`, tokens or `occurred_at`; nothing stored |
 | 403 | body `tenant_id` is not the tenant the edge admitted |
+| 401 / 402 / 503 | the edge refused, nothing stored: no `X-Tenant-Id` header / no usable entitlement / entitlement check failed (see `docs/billing.md`) |
 | 422 | invalid body, including a naive timestamp |
 
 ## How it stays correct
 
-- **Resends:** one `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id`.
-  Two identical requests at the same instant insert once; the loser gets no row back, reads the
-  stored event and compares payloads. There is no check-then-insert.
+- **Resends:** one `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id, late`.
+  Two identical requests at once insert once; the loser gets no row back, reads the stored event and
+  compares payloads. There is no check-then-insert.
 - **Late events:** the same INSERT sets `late = true` when the event's UTC hour is already in
   `closed_hours` (`date_trunc('hour', occurred_at, 'UTC')`, so the session time zone cannot move
-  the hour). A late event is stored and answered 201. Before the INSERT, ingest takes a shared lock
+  the hour). A late event is answered 201 with `"late": true` (a resend says so too, as does the log
+  line), is stored, and is never in a rollup, so it is **not billed**. Ingest first takes a shared lock
   for the event's hour (see Rollups).
 
-**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py` (set `DATABASE_URL`
-if the database is not on port 5432).
+**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py` (`DATABASE_URL` if not port 5432).
 
 **Does not do:** batch intake, or authentication beyond the edge dependency.
 
