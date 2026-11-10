@@ -16,7 +16,8 @@ different payload: **409**. Body `tenant_id` is not the
 tenant the edge admitted: **403**. Invalid body: **422**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
-every UPDATE and DELETE. Nothing that was accepted is ever rewritten.
+every row UPDATE and DELETE (TRUNCATE and a superuser are not stopped). The application never rewrites an
+accepted event.
 
 **3. Hourly rollups.** `app/rollup.py` sums one UTC hour of events per tenant and model into
 `usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`
@@ -45,19 +46,22 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
   period), `past_due` becomes `past_due` and keeps an existing grace period, any other Stripe status becomes
   `canceled`, and `.deleted` is always `canceled`. One subscription per tenant is assumed: deleting any
   subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one.
-- `invoice.payment_failed` sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
+- `invoice.payment_failed` finds the tenant by the customer id an earlier subscription event stored (an
+  unknown customer is `ignored`), sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
   from the first failure: Stripe's retries of the same failed invoice do not extend it, and an `active`
   subscription event clears it. It does not reopen a `canceled` tenant. If `GRACE_PERIOD_HOURS` is not an
   integer from 0 to 8760, a failure that has to open a grace window is **503** and not recorded, so Stripe
   retries it; other events are unaffected.
 - Each event id is stored in the same transaction as its change: a redelivery is **200** `duplicate`. An event
-  older than the last one applied does not overwrite newer state (`stale`). Unknown tenants and unhandled event types
-  are `ignored`. All answers are 200 `{"status": ...}`.
+  older than the last one applied does not overwrite newer state (`stale`; one narrow exception for an older payment
+  failure is in [docs/billing.md](docs/billing.md)). Unknown tenants and unhandled event types
+  are `ignored`. Past the signature check every answer is 200 `{"status": ...}`, except a malformed event
+  (**400**) and a database error (**500**; Stripe retries it).
 
 **6. A fail-closed edge.** `require_entitlement` (`app/edge.py`) guards `/v1/usage` and the charges route.
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
-Any database error: **503**, never allowed.
+Any error reading the entitlement: **503**, never allowed. A database error later in a request is an ordinary **500**.
 
 ## API
 
@@ -66,14 +70,14 @@ Any database error: **503**, never allowed.
 | GET | `/healthz` | 200 `{"status": "ok"}` | none; no edge check |
 | POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 422; edge 401, 402, 503 |
 | GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros}` | 403, 409, 422; edge 401, 402, 503 |
-| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 503; no edge check, the signature is the check |
+| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 500, 503; no edge check, the signature is the check |
 
 ## Run it
 
 ```bash
 docker compose up -d --build   # Postgres 16, the API on 127.0.0.1:8000 and the hourly rollup service
 scripts/demo.sh                # an end-to-end run against that stack (needs curl and python3)
-scripts/test                   # runs the tests against a throwaway Postgres 16 in docker
+scripts/test                   # runs the tests against a Postgres 16 container it starts in docker
 ```
 
 The API and database ports listen on 127.0.0.1 only (`API_PORT` and `DB_PORT` change them). The demo prices a
@@ -87,18 +91,56 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`. To test against your own database:
-`DATABASE_URL=postgresql://... uv run pytest -q`.
+`DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
+on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
 
 ## Not built
 
 - Reconciliation of estimated against actual usage.
 - Pushing usage to Stripe, invoices, or any call to Stripe.
 - Real authentication: the tenant comes from the `X-Tenant-Id` header, which anyone can send.
+- A test-mode guard: `livemode` is never read, so the service is test-mode only because the compose file sets a
+  fake webhook secret.
+- `invoice.paid`: paying an invoice does not restore access; only a `customer.subscription.*` event does.
 - A queue or stream in front of the log: events are written straight to Postgres.
 - Private deployments that cannot report to a central service.
 - A query API over rollups, and an API to add prices (prices are added with `add_price_version`).
-- Billing late events: they are stored and flagged, never rolled up, and nothing reopens a closed hour.
+- Billing late events: they are stored and flagged, never rolled up, and no application code reopens a closed hour.
 - Token columns wider than BIGINT: one tenant, model and hour that sum past 9.2e18 tokens stops the rollup
   loudly (known limit in [docs/ingest.md](docs/ingest.md)).
 
-See also [docs/build-log.md](docs/build-log.md).
+## How it was built
+
+Three Claude Code sessions built this in one afternoon, each in its own cockpit (a Zellij session with a lead tab, a
+review desk and a merge gate): one lead and two assistant devs. [docs/build-log.md](docs/build-log.md) is the
+timestamped record; this is the short version.
+
+**Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI), one brief
+per dev, and was the only session allowed to merge. Dev A built usage intake, rollups and the end-to-end test and demo.
+Dev B built the price table, the Stripe webhooks, the entitlement record, the edge check and this README. Work came
+in as six lanes (`ingest`, `pricing`, `rollup`, `entitlements`, `e2e`, `readme`), each a branch with its own worktree.
+
+**Gates.** A lane merged only when its branch was rebased onto the latest `main` with the tests run on the rebased
+code, an independent review desk (DRC) had reviewed that exact head, and the CI check `test` was green. The cockpit's
+merge command refuses without the review receipt for that head, a head that contains the latest `main`, and green CI;
+when the reviewer left a finding owed, it also wants the lead's written note on it. Each merge moved `main`, which made
+the next branch stale, so the lead rebased, re-tested and re-reviewed one lane at a time.
+
+**What the gates and the cross-checks caught.**
+- DRC found that the hourly token sum can overflow a BIGINT column (kept as a documented limit), and folded fixes of
+  its own into several lanes.
+- Reading each other's code, the devs found further defects. Dev A found that every repeated payment-failure webhook
+  pushed the grace window forward, which the DRC review of that lane had not flagged (fixed before merge). Dev B found
+  a test that could pass by accident because lock waits were counted cluster-wide.
+- In the third DRC pass over the entitlements lane, the reviewer folded in a fix of its own and then flagged that same
+  fix as opening a fail-open case. The lead asked a standing advisor lane, which agreed the guard bought nothing inside
+  the one-subscription-per-tenant assumption, and reverted it; the assumption is documented. The advisor also noticed
+  that compose published a port next to a public dev secret, which became a loopback-only binding.
+- Slips were caught and corrected on every side: the lead mistyped a commit hash in a review job; dev A reported eight
+  clean starts of a compose change where the true count was seven, and pasted demo output from before its last commit
+  (the lead re-ran the demo itself).
+
+**Where it hurt.** The review desk could not run the tests until a tracked `scripts/test` gave it a database; messages
+to one dev were silently held because the cockpit treats a checkout on a `lane/*` branch as a lane, which cannot read
+them; and the serial review and merge queue idled both devs until the work was split so they could cross-review and
+write the README in parallel.
