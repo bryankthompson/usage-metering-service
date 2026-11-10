@@ -31,11 +31,11 @@ VALUES (%(tenant_id)s, %(idempotency_key)s, %(model)s, %(tokens_in)s, %(tokens_o
         EXISTS (SELECT 1 FROM closed_hours
                 WHERE hour_start = date_trunc('hour', %(occurred_at)s::timestamptz, 'UTC')))
 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-RETURNING id
+RETURNING id, late
 """
 
 SELECT_EVENT = """
-SELECT id, model, tokens_in, tokens_out, occurred_at
+SELECT id, model, tokens_in, tokens_out, occurred_at, late
 FROM usage_events WHERE tenant_id = %(tenant_id)s AND idempotency_key = %(idempotency_key)s
 """
 
@@ -55,7 +55,7 @@ def ingest_usage(
     response: Response,
     tenant: str = Depends(require_entitlement),
     conn: psycopg.Connection = Depends(get_conn),
-) -> dict[str, str | int]:
+) -> dict[str, str | int | bool]:
     if event.tenant_id != tenant:
         log.warning("usage rejected: body tenant %r is not the entitled tenant %r", event.tenant_id, tenant)
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
@@ -67,8 +67,9 @@ def ingest_usage(
     inserted = conn.execute(INSERT_EVENT, params).fetchone()
     if inserted is not None:
         conn.commit()
-        log.info("usage accepted: tenant=%s key=%s event_id=%s", tenant, event.idempotency_key, inserted["id"])
-        return {"status": "accepted", "event_id": inserted["id"]}
+        log.info("usage accepted: tenant=%s key=%s event_id=%s late=%s",
+                 tenant, event.idempotency_key, inserted["id"], inserted["late"])
+        return {"status": "accepted", "event_id": inserted["id"], "late": inserted["late"]}
 
     # The key already exists. Read it back (the row is committed: the INSERT waited for any
     # concurrent writer) and compare payloads.
@@ -80,6 +81,7 @@ def ingest_usage(
         log.warning("usage conflict: tenant=%s key=%s reused with a different payload (event_id=%s)",
                     tenant, event.idempotency_key, existing["id"])
         raise HTTPException(status_code=409, detail="idempotency_key was already used with a different payload")
-    log.info("usage duplicate: tenant=%s key=%s event_id=%s", tenant, event.idempotency_key, existing["id"])
+    log.info("usage duplicate: tenant=%s key=%s event_id=%s late=%s",
+             tenant, event.idempotency_key, existing["id"], existing["late"])
     response.status_code = 200
-    return {"status": "duplicate", "event_id": existing["id"]}
+    return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}

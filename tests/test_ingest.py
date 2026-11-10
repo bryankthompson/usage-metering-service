@@ -45,7 +45,8 @@ def test_resend_is_counted_once(client, conn):
     first = client.post("/v1/usage", json=event())
     again = client.post("/v1/usage", json=event())
     assert (first.status_code, again.status_code) == (201, 200)
-    assert again.json() == {"status": "duplicate", "event_id": first.json()["event_id"]}
+    assert first.json()["late"] is False
+    assert again.json() == {"status": "duplicate", "event_id": first.json()["event_id"], "late": False}
     assert count_events(conn) == 1
 
 
@@ -127,6 +128,18 @@ def test_event_in_a_closed_hour_is_stored_late(client, conn, occurred_at, late):
     assert r.status_code == 201
     row = conn.execute("SELECT late FROM usage_events WHERE id = %s", (r.json()["event_id"],)).fetchone()
     assert row["late"] is late
+    assert r.json()["late"] is late  # the response says so too
+
+
+def test_a_late_event_says_so_in_the_response_on_a_resend_and_in_the_log(client, conn, caplog):
+    close_hour(conn, "2026-11-10T10:00:00Z")
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        first = client.post("/v1/usage", json=event())
+        again = client.post("/v1/usage", json=event())
+    assert (first.status_code, first.json()["late"]) == (201, True)
+    assert (again.status_code, again.json()["status"], again.json()["late"]) == (200, "duplicate", True)
+    assert "usage accepted" in caplog.text and "late=True" in caplog.text
+    assert "usage duplicate" in caplog.text
 
 
 def test_late_check_uses_the_utc_hour_in_any_session_time_zone(client, conn, monkeypatch):

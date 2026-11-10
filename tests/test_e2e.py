@@ -122,7 +122,7 @@ def test_the_whole_path_through_the_real_app(client, conn, clock):
 
     # 7. A late event for the closed hour 10:00 is accepted and stored late; the rollup and the total do not move.
     late = client.post("/v1/usage", json=usage("k5", "model-a", 7000, 7000, "2026-11-10T10:55:00Z"), headers=HEADERS)
-    assert late.status_code == 201
+    assert late.status_code == 201 and late.json()["late"] is True                     # the response says it is late
     assert conn.execute("SELECT late FROM usage_events WHERE idempotency_key = 'k5'").fetchone()["late"] is True
     assert count(conn, "usage_events") == 5 and count(conn, "usage_rollups_hourly") == 3
     assert conn.execute("SELECT tokens_in, event_count FROM usage_rollups_hourly WHERE hour_start = %s AND model = 'model-a'",
