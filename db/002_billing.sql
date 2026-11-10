@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS entitlements (
     status                 TEXT        NOT NULL,   -- active | past_due | canceled
     payment_failed_at      TIMESTAMPTZ,
     grace_until            TIMESTAMPTZ,
+    last_event_at          TIMESTAMPTZ,            -- `created` of the newest Stripe event applied: older events never overwrite
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

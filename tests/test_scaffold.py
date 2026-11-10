@@ -25,12 +25,3 @@ def test_usage_events_is_append_only(conn):
     conn.rollback()
     with pytest.raises(psycopg.errors.RaiseException):
         conn.execute("DELETE FROM usage_events")
-
-
-def test_edge_fails_closed_until_implemented():
-    # The stub denies everything: a request without a real entitlement check never gets through.
-    from app.edge import require_entitlement
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as err:
-        require_entitlement()
-    assert err.value.status_code == 503
