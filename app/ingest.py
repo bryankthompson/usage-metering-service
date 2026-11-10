@@ -11,6 +11,7 @@ from pydantic import AwareDatetime, BaseModel, Field, StrictInt
 
 from app.db import get_conn
 from app.edge import require_entitlement
+from app.rollup import lock_hour_shared
 
 # uvicorn configures this logger at INFO, so these lines show in the server output.
 log = logging.getLogger("uvicorn.error")
@@ -56,6 +57,9 @@ def ingest_usage(
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
 
     params = event.model_dump()
+    # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
+    # insert that arrives while the hour is closing waits for the close and then sees it as closed.
+    lock_hour_shared(conn, event.occurred_at)
     inserted = conn.execute(INSERT_EVENT, params).fetchone()
     if inserted is not None:
         conn.commit()

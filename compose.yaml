@@ -24,3 +24,12 @@ services:
       db:
         condition: service_healthy
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  rollup:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://metering:metering@db:5432/metering
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.rollup", "--every", "3600"]
