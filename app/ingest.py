@@ -4,22 +4,51 @@ POST /v1/usage stores one event in the append-only `usage_events` log. A resend 
 (tenant_id, idempotency_key) is counted once. The route sits behind `require_entitlement`.
 """
 import logging
+from collections.abc import Iterator
+from datetime import timezone
+from typing import Annotated
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import AwareDatetime, BaseModel, Field, StrictInt
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, StrictInt, field_validator
 
-from app.db import get_conn
+from app import db
 from app.edge import require_entitlement
 from app.rollup import lock_hour_shared
 
 # uvicorn configures this logger at INFO, so these lines show in the server output.
 log = logging.getLogger("uvicorn.error")
-router = APIRouter()
+
+
+class QuietValidationRoute(APIRoute):
+    """A 422 that does not echo the offending input. FastAPI echoes it, and a NaN, an Infinity or a lone
+    surrogate in it cannot be written as JSON, which turned the 422 into a 500."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def guarded(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as err:
+                detail = [{key: e[key] for key in ("type", "loc", "msg")} for e in err.errors()]
+                return JSONResponse(status_code=422, content={"detail": detail})
+
+        return guarded
+
+
+router = APIRouter(route_class=QuietValidationRoute)
 
 # Per-event token ceiling: far above any real call. A larger number is a 422 instead of a database error.
 # It does not bound a sum of events: see "Known limit" in docs/ingest.md.
 MAX_TOKENS = 10**12
+# Longest tenant_id, idempotency_key or model. These are btree key columns (a row over ~2700 bytes is refused
+# by Postgres, and a refused rollup row would stop every later hour from closing); 200 characters of any
+# script stay well under that.
+MAX_TEXT = 200
 
 # One statement does the dedupe and the late check. ON CONFLICT DO NOTHING makes two identical
 # requests race safely (one inserts, the other gets no row back). `late` is true when the event's
@@ -40,13 +69,51 @@ FROM usage_events WHERE tenant_id = %(tenant_id)s AND idempotency_key = %(idempo
 """
 
 
+def _storable(text: str) -> str:
+    """Postgres text cannot hold a NUL character; stored, it would be a 500. (A lone surrogate is already a 422.)"""
+    if "\x00" in text:
+        raise ValueError("must not contain a NUL character")
+    return text
+
+
+Text = Annotated[str, Field(min_length=1, max_length=MAX_TEXT), AfterValidator(_storable)]
+
+
 class UsageEvent(BaseModel):
-    tenant_id: str = Field(min_length=1)
-    idempotency_key: str = Field(min_length=1, max_length=200)
-    model: str = Field(min_length=1)
+    tenant_id: Text
+    idempotency_key: Text
+    model: Text
     tokens_in: StrictInt = Field(ge=0, le=MAX_TOKENS)
     tokens_out: StrictInt = Field(ge=0, le=MAX_TOKENS)
     occurred_at: AwareDatetime  # a naive timestamp is a 422
+
+    @field_validator("occurred_at")
+    @classmethod
+    def _utc_year_in_range(cls, ts):
+        """Stored hours are read back as Python datetimes (years 1 to 9999): an offset that pushes the UTC
+        instant outside them would store, then fail on the resend and in the rollup."""
+        try:
+            ts.astimezone(timezone.utc)
+        except OverflowError:
+            raise ValueError("occurred_at must be within years 1 to 9999 in UTC") from None
+        return ts
+
+
+def _unavailable(err: psycopg.OperationalError) -> HTTPException:
+    log.error("usage unavailable: %s", err)
+    return HTTPException(status_code=503, detail="database unavailable")
+
+
+def usage_conn() -> Iterator[psycopg.Connection]:
+    """`get_conn`, except that a database that is down is a 503 (as at the edge), not a 500."""
+    try:
+        conn = db.connect()
+    except psycopg.OperationalError as err:
+        raise _unavailable(err) from err
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @router.post("/v1/usage", status_code=201)
@@ -54,12 +121,18 @@ def ingest_usage(
     event: UsageEvent,
     response: Response,
     tenant: str = Depends(require_entitlement),
-    conn: psycopg.Connection = Depends(get_conn),
+    conn: psycopg.Connection = Depends(usage_conn),
 ) -> dict[str, str | int | bool]:
     if event.tenant_id != tenant:
         log.warning("usage rejected: body tenant %r is not the entitled tenant %r", event.tenant_id, tenant)
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
+    try:
+        return _store(event, response, tenant, conn)
+    except psycopg.OperationalError as err:  # the connection dropped part way: the same key is safe to resend
+        raise _unavailable(err) from err
 
+
+def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Connection) -> dict[str, str | int | bool]:
     params = event.model_dump()
     # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
     # insert that arrives while the hour is closing waits for the close and then sees it as closed.
