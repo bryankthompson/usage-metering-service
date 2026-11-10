@@ -70,7 +70,8 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
-    status = STATUS_MAP.get(sub.get("status"), "canceled")
+    # A deleted subscription is canceled whatever status its payload carries (fail closed).
+    status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(sub.get("status"), "canceled")
     items = (sub.get("items") or {}).get("data") or [{}]
     plan = (items[0].get("price") or {}).get("id") or (row and row["plan"])
     payment_failed_at, grace_until = (row["payment_failed_at"], row["grace_until"]) if row else (None, None)
@@ -106,6 +107,13 @@ def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: dateti
     if row["status"] == "canceled":
         # A failed payment must not reopen access: only a subscription event can make a tenant active again.
         return "ignored", tenant_id
+    if row["status"] == "past_due" and row["grace_until"] is not None:
+        # Grace runs from the FIRST failure of a delinquency. Stripe retries a failed invoice for days: a retry must
+        # not slide the window forward. An active subscription event clears it, so a new delinquency starts afresh.
+        conn.execute("UPDATE entitlements SET last_event_at = %s, updated_at = now() WHERE tenant_id = %s",
+                     (created, tenant_id))
+        log.info("webhook repeated failure: tenant=%s keeps grace_until=%s", tenant_id, row["grace_until"].isoformat())
+        return "processed", tenant_id
     conn.execute(
         "UPDATE entitlements SET status = 'past_due', payment_failed_at = %s, grace_until = %s,"
         " last_event_at = %s, updated_at = now() WHERE tenant_id = %s",
