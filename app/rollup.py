@@ -117,6 +117,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.rollup", description="Close every due hour once, or keep doing it with --every.")
     parser.add_argument("--every", type=int, metavar="SECONDS", help="repeat forever, sleeping SECONDS between runs")
     args = parser.parse_args(argv)
+    if args.every is not None and args.every <= 0:
+        parser.error("--every must be a positive number of seconds")
     run_once()
     while args.every:
         time.sleep(args.every)

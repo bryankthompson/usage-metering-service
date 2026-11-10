@@ -145,11 +145,14 @@ def test_an_event_that_arrives_while_the_hour_is_closing_is_late(client, conn):
         # A close in progress: it holds the hour's exclusive lock and has not committed yet.
         closer.execute("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H)))
         with ThreadPoolExecutor(max_workers=1) as pool:
-            posted = pool.submit(client.post, "/v1/usage", json=body("arrives-mid-close", "2026-11-10T10:30:00Z"))
-            wait_until_blocked(conn)
-            assert not posted.done()  # the ingest waits for the close instead of racing it
-            assert close_hour(closer, H) == (0, 0)  # the close finishes without that event, then commits
-            response = posted.result(timeout=10)
+            try:
+                posted = pool.submit(client.post, "/v1/usage", json=body("arrives-mid-close", "2026-11-10T10:30:00Z"))
+                wait_until_blocked(conn)
+                assert not posted.done()  # the ingest waits for the close instead of racing it
+                assert close_hour(closer, H) == (0, 0)  # the close finishes without that event, then commits
+                response = posted.result(timeout=10)
+            finally:
+                closer.rollback()  # release the lock so the worker can end even when an assert failed
     finally:
         closer.close()
 
@@ -177,11 +180,14 @@ def test_a_close_waits_for_an_ingest_already_in_flight_and_counts_it(conn):
                 closer.close()
 
         with ThreadPoolExecutor(max_workers=1) as pool:
-            closing = pool.submit(close_on_own_connection)
-            wait_until_blocked(conn)
-            assert not closing.done()  # the close waits for the ingest
-            ingester.commit()
-            assert closing.result(timeout=10) == (1, 1)
+            try:
+                closing = pool.submit(close_on_own_connection)
+                wait_until_blocked(conn)
+                assert not closing.done()  # the close waits for the ingest
+                ingester.commit()
+                assert closing.result(timeout=10) == (1, 1)
+            finally:
+                ingester.rollback()  # no-op after the commit; frees the lock if an assert failed first
     finally:
         ingester.close()
 
