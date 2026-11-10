@@ -88,6 +88,7 @@ def api(conn):
     thread.start()
     try:
         while not server.started:
+            assert thread.is_alive(), "the test server thread died before it started"
             thread.join(0.01)
         conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES (%s, 'active')", (TENANT,))
         conn.commit()
@@ -207,3 +208,49 @@ def test_cli_live_writes_no_file_unless_asked(api, stand_in, monkeypatch, tmp_pa
     monkeypatch.chdir(tmp_path)
     assert seekrflow.main(["live", "--tenant", TENANT, "--prompt", "hi", "--api", api, "--base", stand_in]) == 0
     assert list(tmp_path.iterdir()) == []
+
+
+def test_fetch_chat_does_not_follow_a_redirect_with_the_key(stand_in):
+    """A 302 to another origin must fail the call, and the other origin must never see the key."""
+    reached = []
+
+    class Elsewhere(BaseHTTPRequestHandler):
+        def do_POST(self):   # urllib turns a followed 302 into a GET, so both methods record the header
+            reached.append(self.headers["Authorization"])
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        do_GET = do_POST
+
+        def log_message(self, *args):
+            pass
+
+    other = HTTPServer(("127.0.0.1", 0), Elsewhere)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+
+    class Redirector(BaseHTTPRequestHandler):
+        def do_POST(self):   # an empty body, as a real redirect has
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{other.server_port}/v1/inference/chat/completions")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    start = HTTPServer(("127.0.0.1", 0), Redirector)
+    threading.Thread(target=start.serve_forever, daemon=True).start()
+    try:
+        failure = ""
+        try:
+            fetch_chat(f"http://127.0.0.1:{start.server_port}/v1", "key-SECRET-xyz", {"model": "m", "messages": []})
+        except RuntimeError as err:
+            failure = str(err)
+        assert reached == [], "the key reached another origin"
+        assert "answered 302" in failure
+    finally:
+        start.shutdown()
+        other.shutdown()

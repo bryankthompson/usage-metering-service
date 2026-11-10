@@ -4,8 +4,8 @@ Built from the public API documentation only; no call to the real service has be
 The response does not say which customer made the call, so the caller supplies the tenant.
 Standard library only.
 
-    python -m app.seekrflow replay FILE.json --tenant T [--api URL]
-    python -m app.seekrflow live --tenant T --prompt TEXT [--api URL]     (needs SEEKR_API_KEY)
+    python -m app.seekrflow replay FILE.json --tenant T [--api URL] [--model M]
+    python -m app.seekrflow live --tenant T --prompt TEXT [--api URL] [--spool FILE]     (needs SEEKR_API_KEY)
 """
 import argparse
 import json
@@ -69,7 +69,10 @@ def _post_json(url: str, body: dict, headers: dict) -> tuple[int, dict]:
         with _NO_REDIRECT.open(request, timeout=30) as reply:
             return reply.status, json.load(reply)
     except urllib.error.HTTPError as err:   # an answer with an error status; a transport error propagates
-        return err.code, json.load(err)
+        try:
+            return err.code, json.load(err)
+        except ValueError:   # a redirect or a proxy page has no JSON body: keep the status, drop the body
+            return err.code, {}
 
 
 def post_usage(event: dict, api_base: str, tenant_id: str) -> tuple[int, dict]:

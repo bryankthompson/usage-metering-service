@@ -12,6 +12,10 @@ SEEKR_API_KEY=... python3 -m app.seekrflow live --tenant tenant-1 --prompt "hell
 `replay` takes one saved response or a JSON list and prints `id in=N out=N status accepted|duplicate` per event; it exits
 non-zero on any error. `live` needs `SEEKR_API_KEY` in the environment, fails without it and never prints it; it has never
 been run. `fetch_chat` is tested only against a stand-in `http.server` on 127.0.0.1.
+`live --spool FILE` saves the response to FILE before posting, so a refused post can be replayed with `replay FILE`; without it
+nothing is written, and a failed post loses that response's usage (the command still exits 1). A rerun with the same FILE
+overwrites it. `replay --model M` names the model for a response that has none (embeddings). A redirect from the service is
+refused, so the key is never sent to another origin (tested).
 
 Mapping: `tokens_in` = `usage.prompt_tokens`; `tokens_out` = `usage.completion_tokens` (0 for embeddings, which have `data`
 and no `choices`); `model` = the response `model` (the caller's argument for embeddings); `occurred_at` = `created` as an
