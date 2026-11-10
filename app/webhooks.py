@@ -91,7 +91,7 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     customer = _text(sub.get("customer")) or (row and row["stripe_customer_id"])
     subscription_id = _text(sub.get("id")) or (row and row["stripe_subscription_id"])
     payment_failed_at, grace_until = (row["payment_failed_at"], row["grace_until"]) if row else (None, None)
-    if status == "active":
+    if status in ("active", "canceled"):               # a cancel leaves no grace window to revive later
         payment_failed_at = grace_until = None
     conn.execute(
         "INSERT INTO entitlements (tenant_id, stripe_customer_id, stripe_subscription_id, plan, status,"

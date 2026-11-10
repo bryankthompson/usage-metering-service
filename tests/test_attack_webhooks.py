@@ -286,3 +286,27 @@ def test_grace_period_outside_its_range_is_503_and_nothing_is_recorded(client, c
     payload = event("evt_b", "invoice.payment_failed", int(time.time()), {"id": "in_b", "customer": "cus_b"})
     assert post(client, payload).status_code == 503
     assert counts(conn) == events_before
+
+
+# --- a cancel must not leave a live grace window behind ---
+
+def test_a_canceled_tenant_does_not_come_back_through_an_old_grace_window(client, conn):
+    # Failure -> grace window; the subscription is then deleted; a later past_due event must not revive the old window.
+    base = int(time.time())
+    post(client, subscription_event("evt_1", base - 30, tenant_id="tenant-1", customer="cus_1"))
+    post(client, event("evt_2", "invoice.payment_failed", base - 20, {"id": "in_1", "customer": "cus_1"}))
+    assert conn.execute("SELECT grace_until FROM entitlements").fetchone()["grace_until"] is not None
+    post(client, subscription_event("evt_3", base - 10, tenant_id="tenant-1", customer="cus_1", event_type="customer.subscription.deleted"))
+    row = conn.execute("SELECT status, grace_until FROM entitlements").fetchone()
+    assert row["status"] == "canceled" and row["grace_until"] is None
+    post(client, subscription_event("evt_4", base, tenant_id="tenant-1", customer="cus_1", status="past_due"))
+    row = conn.execute("SELECT status, grace_until FROM entitlements").fetchone()
+    assert row["status"] == "past_due" and row["grace_until"] is None          # past_due with no window is denied by the edge
+
+
+def test_livemode_is_not_read_so_a_live_mode_event_signed_with_the_secret_is_applied(client, conn):
+    # Pins what the README says under "Not built": test mode is the fake secret, not a check in the code.
+    sub = {"id": "sub_1", "customer": "cus_1", "status": "active", "metadata": {"tenant_id": "tenant-1"}}
+    payload = json.dumps({"id": "evt_live", "type": "customer.subscription.updated", "created": int(time.time()), "livemode": True,
+                          "data": {"object": sub}}).encode()
+    assert post(client, payload).json() == {"status": "processed"}
