@@ -15,10 +15,12 @@ Money is an integer count of micro-USD (1 USD = 1,000,000). No float and no true
 half up ONCE on that sum. Example: 1 token at 1,500 micros per 1k is 1.5, which becomes 2.
 
 ## Charges
-`GET /v1/tenants/{tenant_id}/charges?start=...&end=...` (timezone-aware datetimes) rates the tenant's
+`GET /v1/tenants/{tenant_id}/charges?start=...&end=...` (ISO 8601 text with a time zone, such as
+`2026-11-01T00:00:00Z`; a bare number is not read as Unix seconds) rates the tenant's
 `usage_rollups_hourly` rows with `start <= hour_start < end`. Each row is rated at its own `hour_start`, so a price
 change mid-period applies from its effective time. Each row is rounded on its own; `total_micros` is the sum of lines.
-Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes or `start >= end`,
+Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes, a number instead of ISO text,
+or `start >= end`,
 409 if a row has no price in force (the response names the model). The route sits behind `require_entitlement`, so
 the edge can also answer 401, 402 or 503 as in the edge table below.
 
@@ -31,14 +33,17 @@ No admin API: prices are added through `add_price_version`. Nothing is sent to S
 # Billing: Stripe webhooks and the edge check (test mode)
 
 `POST /v1/stripe/webhook` checks `Stripe-Signature` on the raw body (`stripe.Webhook.construct_event`, secret
-`STRIPE_WEBHOOK_SECRET`) before it touches the database. No secret set: 503. Missing or bad signature, a timestamp
-older than 5 minutes, or an unparsable body: 400. The tenant is `subscription.metadata.tenant_id` (the row is
+`STRIPE_WEBHOOK_SECRET`) before it touches the database. No secret set (or a blank one): 503. A body over 1 MiB: 413
+(it is read before the signature can be checked, so it is capped). Missing or bad signature, a timestamp older than
+5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is 503 on every route, not 500. The tenant is `subscription.metadata.tenant_id` (the row is
 created or updated) or, for invoices, the `entitlements` row with that `stripe_customer_id`. No tenant found: 200
-`{"status": "ignored"}`, logged, not recorded. Other event types are ignored the same way.
+`{"status": "ignored"}`, logged, not recorded. Other event types are ignored the same way, and so is a subscription
+whose `tenant_id` is not usable text: over 200 characters (the limit `/v1/usage` has), a control character or a lone
+surrogate in it, or a space or tab at either end (the edge trims the header, so such a tenant could never match).
 
 | Event | Effect |
 |---|---|
-| `customer.subscription.created/updated/deleted` | `plan` = Stripe price id. `active`/`trialing` -> `active`, clears the failure and grace. `past_due` -> `past_due`, keeps an existing grace window. Any other status -> `canceled`. `deleted` is always `canceled`, whatever status its payload carries. |
+| `customer.subscription.created/updated/deleted` | `plan` = Stripe price id. `active`/`trialing` -> `active`, clears the failure and grace. `past_due` -> `past_due`, keeps an existing grace window. Any other status -> `canceled`. `deleted` is always `canceled`, whatever status its payload carries. A cancel clears the failure and the grace window, so a later `past_due` event starts with none. |
 | `invoice.payment_failed` | `past_due`, `payment_failed_at` = event `created`, `grace_until` = that + `GRACE_PERIOD_HOURS` (default 72). A `canceled` tenant stays canceled. |
 
 Grace runs from the first failure of a delinquency. Stripe retries a failed invoice for days, so a later
@@ -71,7 +76,26 @@ It opens its own database connection (one extra per request), so a database that
 | `past_due` | allowed while `now <= grace_until`; 402 after, or with no `grace_until` |
 | database error | 503, never allowed |
 
+## Assumptions and limits
+These are known and not fixed; see also the two assumptions above (one customer per tenant, one subscription per tenant).
+- **A tenant is not bound to a Stripe customer.** A subscription event for tenant X overwrites X's stored customer id
+  with the event's. Repro: post a signed `customer.subscription.updated` for `victim` with customer `cus_victim`, then
+  another for `victim` with customer `cus_other`; a later `invoice.payment_failed` for `cus_victim` is `ignored`, so the
+  tenant keeps access. The signed event comes from Stripe and the metadata is set by the operator, so this needs a
+  mistake or a bad actor on the operator's side.
+- **`X-Tenant-Id` is spoofable and ambiguous.** It stands in for authentication. If it is sent twice, the first value wins
+  (`t2` then `t1` is `t2`); `t1, t2` in one header is the tenant `t1, t2`, which has no entitlement (402).
+- **A far-future `created` pins a tenant.** `last_event_at` takes the event's `created`, and a later event with an earlier
+  `created` is `stale`. A signed event dated far in the future (a Stripe clock fault) would make real events stale for that tenant
+  until the row is repaired. Not tested.
+- **Concurrency is tested with threads in one process.** Multi-process behaviour (several uvicorn workers) is not tested; the
+  per-tenant advisory lock and the row lock are what it relies on.
+- **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
+  database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
+  turn into 503; not tested under load.
+
 Tests: `uv run pytest -q tests/test_webhooks.py tests/test_edge.py` (signed with a fake `whsec_test_...` secret).
+The adversarial set is `tests/test_attack_webhooks.py`, `tests/test_attack_billing.py` and `tests/test_attack_db_outage.py`.
 Not done: calling Stripe, usage push, invoices, real authentication.
 
 ## Delinquent report
