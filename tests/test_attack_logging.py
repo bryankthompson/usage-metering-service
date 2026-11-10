@@ -68,3 +68,10 @@ def test_an_invalid_log_level_falls_back_to_info_and_says_so_without_crashing(va
     err = run(EMIT, LOG_LEVEL=value)
     assert "INFO-LINE" in err and "DEBUG-LINE" not in err
     assert "is not one of DEBUG, INFO, WARNING, ERROR, CRITICAL; using INFO" in err and repr(value) in err
+
+
+def test_the_level_holds_when_something_else_already_configured_the_root_logger():
+    # basicConfig does nothing if the root logger has a handler (a test runner, a wrapper): the app logger's own level must
+    # still let INFO through to that handler.
+    err = run("logging.getLogger().addHandler(logging.StreamHandler())\n" + EMIT)
+    assert err.count("INFO-LINE") == 1 and "DEBUG-LINE" not in err
