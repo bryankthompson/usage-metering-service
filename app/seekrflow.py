@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--model", help="model to use for a response that omits it (embeddings)")
     live = sub.add_parser("live", help="call the service once and post its usage (needs SEEKR_API_KEY)")
     live.add_argument("--prompt", required=True)
-    live.add_argument("--spool", help="file to save the response to before posting (default seekr-<id>.json)")
+    live.add_argument("--spool", help="save the response to this file before posting, so a failed post can be replayed (off by default)")
     for p in (replay, live):
         p.add_argument("--tenant", required=True)
         p.add_argument("--api", default=DEFAULT_API, help=f"our intake (default {DEFAULT_API})")
@@ -120,10 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError("SEEKR_API_KEY is not set")
             body = {"model": DEFAULT_MODEL, "messages": [{"role": "user", "content": args.prompt}]}
             response = fetch_chat(args.base, key, body)
-            spool = args.spool or f"seekr-{response.get('id')}.json"
-            with open(spool, "w") as f:   # saved first: a failed post can be replayed, the usage is not lost
-                json.dump(response, f)
-            print(f"saved {spool}", file=sys.stderr)
+            if args.spool:   # saved first: a failed post can be replayed, the usage is not lost
+                with open(args.spool, "w") as f:
+                    json.dump(response, f)
+                print(f"saved {args.spool}", file=sys.stderr)
             _send(response, args.tenant, args.api)
     except Exception as err:
         print(f"error: {err}", file=sys.stderr)

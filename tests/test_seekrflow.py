@@ -189,3 +189,21 @@ def test_cli_live_against_the_stand_in_never_prints_the_key(api, stand_in, monke
     assert seekrflow.main(["live", "--tenant", TENANT, "--prompt", "hi", "--api", api, "--base", stand_in]) == 0
     captured = capsys.readouterr()
     assert "key-SECRET-xyz" not in captured.out + captured.err and StandIn.seen["auth"] == "key-SECRET-xyz"
+
+
+def test_cli_live_spools_the_response_before_posting_only_when_asked(api, stand_in, monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("SEEKR_API_KEY", "key-SECRET-xyz")
+    spool = tmp_path / "saved.json"
+    # a refused post (unknown tenant) still leaves the response on disk, so the usage can be replayed
+    assert seekrflow.main(["live", "--tenant", "nobody", "--prompt", "hi", "--api", api, "--base", stand_in,
+                           "--spool", str(spool)]) == 1
+    assert json.loads(spool.read_text())["usage"]["prompt_tokens"] >= 0
+    assert "key-SECRET-xyz" not in capsys.readouterr().err
+    assert seekrflow.main(["replay", str(spool), "--tenant", TENANT, "--api", api]) == 0
+
+
+def test_cli_live_writes_no_file_unless_asked(api, stand_in, monkeypatch, tmp_path):
+    monkeypatch.setenv("SEEKR_API_KEY", "key-SECRET-xyz")
+    monkeypatch.chdir(tmp_path)
+    assert seekrflow.main(["live", "--tenant", TENANT, "--prompt", "hi", "--api", api, "--base", stand_in]) == 0
+    assert list(tmp_path.iterdir()) == []
