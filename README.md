@@ -10,8 +10,9 @@ Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: no
 **1. A usage event comes in.** `POST /v1/usage` (`app/ingest.py`) takes `tenant_id`, `idempotency_key`,
 `model`, `tokens_in`, `tokens_out` (integers, 0 to 10^12) and `occurred_at` (a timestamp with a time zone).
 One `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` does the dedupe, so two identical
-requests at the same instant store one event. New event: **201**. Resend with the same key and payload:
-**200** `duplicate`, nothing stored. Same key with a different payload: **409**. Body `tenant_id` is not the
+requests at the same instant store one event. New event: **201** `accepted`. Resend with the same key and
+payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
+different payload: **409**. Body `tenant_id` is not the
 tenant the edge admitted: **403**. Invalid body: **422**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
@@ -21,8 +22,8 @@ every UPDATE and DELETE. Nothing that was accepted is ever rewritten.
 `usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`
 closes every hour that has events and ended at least 5 minutes ago (`--every SECONDS` repeats; compose runs
 it hourly as the `rollup` service). Late and duplicate events never change a closed hour: an event whose
-UTC hour is already closed is stored with `late = true` and answered 201 like any other, but it is left out
-of the rollup, so it is never charged. Ingest takes a shared advisory lock on the event's hour and closing
+UTC hour is already closed is stored with `late = true` and answered 201 with `"late": true` (a resend says
+so too), but it is left out of the rollup, so it is never charged. Ingest takes a shared advisory lock on the event's hour and closing
 takes the exclusive one, so every event of a closed hour is either in its closed rollup or flagged late,
 never both and never neither. Details and the known limit: [docs/ingest.md](docs/ingest.md).
 
@@ -63,19 +64,26 @@ Any database error: **503**, never allowed.
 | Method | Path | Success | Other answers |
 |--|--|--|--|
 | GET | `/healthz` | 200 `{"status": "ok"}` | none; no edge check |
-| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id"}`, or 200 `{"status": "duplicate", "event_id"}` | 403, 409, 422; edge 401, 402, 503 |
+| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 422; edge 401, 402, 503 |
 | GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros}` | 403, 409, 422; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 503; no edge check, the signature is the check |
 
 ## Run it
 
 ```bash
-docker compose up     # Postgres 16, the API on :8000 and the hourly rollup service
-scripts/test          # runs the tests against a throwaway Postgres 16 in docker
+docker compose up -d --build   # Postgres 16, the API on 127.0.0.1:8000 and the hourly rollup service
+scripts/demo.sh                # an end-to-end run against that stack (needs curl and python3)
+scripts/test                   # runs the tests against a throwaway Postgres 16 in docker
 ```
 
-Postgres applies the files in `db/` only when its data volume is first created. If a volume already exists
-from an earlier run, run `docker compose down -v` once to start clean.
+The API and database ports listen on 127.0.0.1 only (`API_PORT` and `DB_PORT` change them). The demo prices a
+model, sends a locally signed subscription event, posts usage (with a resend), closes the hour with the rollup
+and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo.md). Two things to know:
+- Give the API a few seconds after `up -d`. A demo run before it listens prints `FAIL step 3 ... got 000`:
+  run it again.
+- Postgres applies the files in `db/` only when its data volume is first created, so an existing or
+  half-built volume (for example after an interrupted first start) is not repaired. Run `docker compose down -v`
+  (it deletes the data) and start again.
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`. To test against your own database:
@@ -89,6 +97,7 @@ The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Setting
 - A queue or stream in front of the log: events are written straight to Postgres.
 - Private deployments that cannot report to a central service.
 - A query API over rollups, and an API to add prices (prices are added with `add_price_version`).
+- Billing late events: they are stored and flagged, never rolled up, and nothing reopens a closed hour.
 - Token columns wider than BIGINT: one tenant, model and hour that sum past 9.2e18 tokens stops the rollup
   loudly (known limit in [docs/ingest.md](docs/ingest.md)).
 
