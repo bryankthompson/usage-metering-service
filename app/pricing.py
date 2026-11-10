@@ -10,7 +10,7 @@ charge for a past hour is rated with the price that applied then.
 import logging
 import re
 from bisect import bisect_right
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 import psycopg
@@ -80,7 +80,8 @@ def price_at(conn: psycopg.Connection, model: str, at: datetime) -> dict:
 def _in_force(keys: list[datetime], versions: list[dict], at: datetime) -> dict | None:
     """What `price_at` selects, from versions already loaded and sorted by (effective_from, version); `keys` are their
     effective_from values. The last one at or before `at` wins, so a tie goes to the later version."""
-    index = bisect_right(keys, at)
+    # Same-zone aware datetimes compare by wall clock, which is wrong across a DST fallback: compare in UTC.
+    index = bisect_right(keys, at.astimezone(timezone.utc))
     return versions[index - 1] if index else None
 
 
@@ -122,7 +123,7 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
                 "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
                 " WHERE model = ANY(%s) ORDER BY effective_from, version", (models,)):
             loaded[v["model"]].append(v)
-    keys = {model: [v["effective_from"] for v in versions] for model, versions in loaded.items()}
+    keys = {model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()}
     lines = []
     for row in rows:
         version = _in_force(keys[row["model"]], loaded[row["model"]], row["hour_start"])
