@@ -89,6 +89,8 @@ def test_tenant_mismatch_is_403_and_stores_nothing(client, conn):
     {"tokens_in": -1},
     {"tokens_out": -1},
     {"tokens_in": 1.5},
+    {"tokens_in": 10**12 + 1},
+    {"tokens_out": 10**12 + 1},
     {"tenant_id": ""},
     {"idempotency_key": ""},
     {"idempotency_key": "k" * 201},
@@ -97,6 +99,10 @@ def test_tenant_mismatch_is_403_and_stores_nothing(client, conn):
 def test_invalid_body_is_422_and_stores_nothing(client, conn, change):
     assert client.post("/v1/usage", json=event(**change)).status_code == 422
     assert count_events(conn) == 0
+
+
+def test_the_largest_token_counts_are_accepted(client):
+    assert client.post("/v1/usage", json=event(tokens_in=10**12, tokens_out=10**12)).status_code == 201
 
 
 def test_key_of_200_chars_is_accepted(client):

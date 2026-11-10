@@ -11,10 +11,15 @@ from pydantic import AwareDatetime, BaseModel, Field, StrictInt
 
 from app.db import get_conn
 from app.edge import require_entitlement
+from app.rollup import lock_hour_shared
 
 # uvicorn configures this logger at INFO, so these lines show in the server output.
 log = logging.getLogger("uvicorn.error")
 router = APIRouter()
+
+# Per-event token ceiling: far above any real call. A larger number is a 422 instead of a database error.
+# It does not bound a sum of events: see "Known limit" in docs/ingest.md.
+MAX_TOKENS = 10**12
 
 # One statement does the dedupe and the late check. ON CONFLICT DO NOTHING makes two identical
 # requests race safely (one inserts, the other gets no row back). `late` is true when the event's
@@ -39,8 +44,8 @@ class UsageEvent(BaseModel):
     tenant_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1)
-    tokens_in: StrictInt = Field(ge=0)
-    tokens_out: StrictInt = Field(ge=0)
+    tokens_in: StrictInt = Field(ge=0, le=MAX_TOKENS)
+    tokens_out: StrictInt = Field(ge=0, le=MAX_TOKENS)
     occurred_at: AwareDatetime  # a naive timestamp is a 422
 
 
@@ -56,6 +61,9 @@ def ingest_usage(
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
 
     params = event.model_dump()
+    # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
+    # insert that arrives while the hour is closing waits for the close and then sees it as closed.
+    lock_hour_shared(conn, event.occurred_at)
     inserted = conn.execute(INSERT_EVENT, params).fetchone()
     if inserted is not None:
         conn.commit()
