@@ -11,7 +11,7 @@ REQUESTS/2 x 201 and the rest 200 (no 503, no 500) and the api log gained no "Tr
 import collections, concurrent.futures as cf, hashlib, hmac, json, os, subprocess, sys, time, urllib.error, urllib.request
 from datetime import datetime, timezone
 
-BASE = f"http://localhost:{os.environ.get('API_PORT', '8000')}"
+BASE = f"http://localhost:{os.environ.get('API_PORT') or '8000'}"
 SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_test_only_not_a_real_secret")  # the fake secret in compose.yaml
 
 
@@ -50,8 +50,13 @@ def tracebacks():
 if sys.argv[1:] == ["--provision"]:
     print(provision())
     sys.exit(0)
-total = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-clients = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+try:
+    total = int(sys.argv[1]) if len(sys.argv) > 1 else 600
+    clients = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+except ValueError:
+    sys.exit("usage: flood.py [REQUESTS>=2] [CLIENTS>=1] (integers)")
+if total < 2 or clients < 1:
+    sys.exit("usage: flood.py [REQUESTS>=2] [CLIENTS>=1] (integers)")
 tenant, before, run = provision(), tracebacks(), time.time_ns()
 hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
 

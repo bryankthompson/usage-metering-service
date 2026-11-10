@@ -11,7 +11,7 @@ TENANT=$(python3 scripts/flood.py --provision)
 N=$(date +%s)
 HOUR=$(date -u +%Y-%m-%dT%H:00:00Z)
 post() { # post KEY -> the HTTP status ("000" when nothing answers)
-  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/usage" -H "X-Tenant-Id: $TENANT" -H 'Content-Type: application/json' \
+  curl -s --connect-timeout 5 --max-time 30 -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/usage" -H "X-Tenant-Id: $TENANT" -H 'Content-Type: application/json' \
     -d "{\"tenant_id\":\"$TENANT\",\"idempotency_key\":\"outage-$N-$1\",\"model\":\"demo-model\",\"tokens_in\":1,\"tokens_out\":1,\"occurred_at\":\"$HOUR\"}" || true
 }
 expect() { [ "$2" = "$3" ] || { echo "FAIL $1: expected $3, got $2"; exit 1; }; echo "$1 -> $2"; }
