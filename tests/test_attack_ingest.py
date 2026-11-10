@@ -204,15 +204,15 @@ def test_ingest_racing_the_close_is_never_both_and_never_neither(conn):
 
             def send(s):
                 client = TestClient(app, raise_server_exceptions=False)
-                start.wait()
+                start.wait(timeout=30)
                 return [client.post("/v1/usage", json=event(
                     idempotency_key=f"r{r}-s{s}-{i}", occurred_at=(hour + timedelta(minutes=10 + i)).isoformat())).status_code
                     for i in range(per_sender)]
 
             def close():
+                start.wait(timeout=30)
                 closer = db.connect()
                 try:
-                    start.wait()
                     time.sleep(delay)
                     return close_hour(closer, hour)
                 finally:
@@ -244,9 +244,9 @@ def test_several_rollups_at_once_close_each_hour_once(conn):
     start = threading.Barrier(4)
 
     def run():
+        start.wait(timeout=30)
         mine = db.connect()
         try:
-            start.wait()
             return close_due_hours(mine, FAR_FUTURE)
         finally:
             mine.close()
@@ -273,12 +273,14 @@ def test_a_close_whose_connection_is_killed_part_way_leaves_the_hour_open(conn):
         locker.execute("LOCK TABLE usage_events IN ACCESS EXCLUSIVE MODE")  # the aggregate step will wait on this
         with ThreadPoolExecutor(max_workers=1) as pool:
             closing = pool.submit(close_hour, victim, H)
-            wait_until_blocked(conn, "relation")
-            conn.execute("SELECT pg_terminate_backend(%s)", (victim.info.backend_pid,))
-            conn.commit()
-            with pytest.raises(psycopg.OperationalError):
-                closing.result(timeout=10)
-        locker.rollback()
+            try:
+                wait_until_blocked(conn, "relation")
+                conn.execute("SELECT pg_terminate_backend(%s)", (victim.info.backend_pid,))
+                conn.commit()
+                with pytest.raises(psycopg.OperationalError):
+                    closing.result(timeout=10)
+            finally:
+                locker.rollback()  # release the lock before the pool waits for the worker
     finally:
         locker.close()
         victim.close()
@@ -315,12 +317,15 @@ def test_the_database_dying_mid_request_is_503_and_the_same_key_can_be_resent(cl
         holder.execute("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H)))
         with ThreadPoolExecutor(max_workers=1) as pool:
             posting = pool.submit(client.post, "/v1/usage", json=event())
-            wait_until_blocked(conn)
-            conn.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
-                " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")
-            conn.commit()
-            assert posting.result(timeout=10).status_code == 503
+            try:
+                wait_until_blocked(conn)
+                conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")
+                conn.commit()
+                assert posting.result(timeout=10).status_code == 503
+            finally:
+                holder.rollback()  # release the lock before the pool waits for the worker
     finally:
         holder.rollback()
         holder.close()
