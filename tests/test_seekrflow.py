@@ -86,13 +86,15 @@ def api(conn):
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    while not server.started:
-        thread.join(0.01)
-    conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES (%s, 'active')", (TENANT,))
-    conn.commit()
-    yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
-    server.should_exit = True
-    thread.join(10)
+    try:
+        while not server.started:
+            thread.join(0.01)
+        conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES (%s, 'active')", (TENANT,))
+        conn.commit()
+        yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        thread.join(10)
 
 
 def rows(conn):

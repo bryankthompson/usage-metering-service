@@ -54,10 +54,19 @@ def usage_event(response: dict, tenant_id: str, model: str | None = None) -> dic
     }
 
 
+class _Refuse(urllib.request.HTTPRedirectHandler):
+    """A redirect would carry the API key to another origin: surface it as an HTTP error instead."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_NO_REDIRECT = urllib.request.build_opener(_Refuse)
+
+
 def _post_json(url: str, body: dict, headers: dict) -> tuple[int, dict]:
     request = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
     try:
-        with urllib.request.urlopen(request, timeout=30) as reply:
+        with _NO_REDIRECT.open(request, timeout=30) as reply:
             return reply.status, json.load(reply)
     except urllib.error.HTTPError as err:   # an answer with an error status; a transport error propagates
         return err.code, json.load(err)
@@ -76,8 +85,8 @@ def fetch_chat(api_base: str, api_key: str, body: dict) -> dict:
     return reply
 
 
-def _send(response: dict, tenant: str, api: str) -> None:
-    event = usage_event(response, tenant)
+def _send(response: dict, tenant: str, api: str, model: str | None = None) -> None:
+    event = usage_event(response, tenant, model)
     status, body = post_usage(event, api, tenant)
     if status not in (200, 201):
         raise RuntimeError(f"intake answered {status}: {body}")
@@ -90,8 +99,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     replay = sub.add_parser("replay", help="post a saved response (one JSON object or a list)")
     replay.add_argument("file")
+    replay.add_argument("--model", help="model to use for a response that omits it (embeddings)")
     live = sub.add_parser("live", help="call the service once and post its usage (needs SEEKR_API_KEY)")
     live.add_argument("--prompt", required=True)
+    live.add_argument("--spool", help="file to save the response to before posting (default seekr-<id>.json)")
     for p in (replay, live):
         p.add_argument("--tenant", required=True)
         p.add_argument("--api", default=DEFAULT_API, help=f"our intake (default {DEFAULT_API})")
@@ -102,13 +113,18 @@ def main(argv: list[str] | None = None) -> int:
             with open(args.file) as f:
                 saved = json.load(f)
             for response in saved if isinstance(saved, list) else [saved]:
-                _send(response, args.tenant, args.api)
+                _send(response, args.tenant, args.api, args.model)
         else:
             key = os.environ.get("SEEKR_API_KEY")
             if not key:
                 raise RuntimeError("SEEKR_API_KEY is not set")
             body = {"model": DEFAULT_MODEL, "messages": [{"role": "user", "content": args.prompt}]}
-            _send(fetch_chat(args.base, key, body), args.tenant, args.api)
+            response = fetch_chat(args.base, key, body)
+            spool = args.spool or f"seekr-{response.get('id')}.json"
+            with open(spool, "w") as f:   # saved first: a failed post can be replayed, the usage is not lost
+                json.dump(response, f)
+            print(f"saved {spool}", file=sys.stderr)
+            _send(response, args.tenant, args.api)
     except Exception as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
