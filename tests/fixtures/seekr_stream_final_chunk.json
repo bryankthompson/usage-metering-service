@@ -1,0 +1,2 @@
+{"id": "chatcmpl-hand-0004", "object": "chat.completion.chunk", "created": 1783678080, "model": "meta-llama/Llama-3.1-8B-Instruct",
+ "choices": [], "usage": {"prompt_tokens": 40, "completion_tokens": 60, "total_tokens": 100}}

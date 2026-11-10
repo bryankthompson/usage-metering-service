@@ -1,0 +1,3 @@
+{"id": "chatcmpl-hand-0002", "object": "chat.completion", "created": 1783677960, "model": "meta-llama/Llama-3.3-70B-Instruct",
+ "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi."}, "finish_reason": "stop"}],
+ "usage": {"prompt_tokens": 2000, "completion_tokens": 100, "total_tokens": 2100, "prompt_tokens_details": {"cached_tokens": 1500}}}
