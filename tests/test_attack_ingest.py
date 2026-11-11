@@ -365,13 +365,14 @@ def test_a_tenant_cannot_post_usage_as_another_tenant(conn):
 
 # --- the documented limit holds: a sum past BIGINT fails loudly and closes nothing ----------------------------------------
 
-def test_a_rollup_sum_past_bigint_raises_and_leaves_the_hour_open(conn):
+def test_a_rollup_sum_past_bigint_fails_and_leaves_the_hour_open(conn):
     """docs/ingest.md "Known limit": rows are inserted directly because the API caps one event at 10^12."""
     for key in ("a", "b"):
         conn.execute(
             "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
             " VALUES ('t1', %s, 'm1', 5000000000000000000, 0, %s)", (key, H + timedelta(minutes=5)))
     conn.commit()
-    with pytest.raises(psycopg.errors.NumericValueOutOfRange):
-        close_due_hours(conn, FAR_FUTURE)
+    failed = []
+    assert close_due_hours(conn, FAR_FUTURE, failed=failed) == []  # isolated: logged and reported, not raised
+    assert failed == [H]
     assert count(conn, "closed_hours") == 0 and count(conn, "usage_rollups_hourly") == 0
