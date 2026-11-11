@@ -8,7 +8,8 @@ Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: no
 ## How it works
 
 **1. A usage event comes in.** `POST /v1/usage` (`app/ingest.py`) takes `tenant_id`, `idempotency_key`,
-`model`, `tokens_in`, `tokens_out` (integers, 0 to 10^12) and `occurred_at` (a timestamp with a time zone).
+`model` (1 to 200 characters each), `tokens_in`, `tokens_out` (integers, 0 to 10^12) and `occurred_at`
+(ISO 8601 text with a time zone).
 One `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` does the dedupe, so two identical
 requests at the same instant store one event. New event: **201** `accepted`. Resend with the same key and
 payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
@@ -35,7 +36,7 @@ never both and never neither. Details and the known limit: [docs/ingest.md](docs
 is never rated as zero. A rate is `(tokens_in * input_price + tokens_out * output_price) / 1000` in integer
 arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at its
 own hour, so a price change mid-period applies from its effective time. **403** for another tenant, **422**
-for a naive timestamp or `start >= end`, **409** when a row has no price in force. Details:
+for a naive timestamp, a `start` or `end` that is not ISO 8601 text, or `start >= end`, **409** when a row has no price in force. Details:
 [docs/billing.md](docs/billing.md).
 
 **5. Stripe test-mode webhooks set the entitlement.** `POST /v1/stripe/webhook` (`app/webhooks.py`) checks
@@ -56,12 +57,24 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
   older than the last one applied does not overwrite newer state (`stale`; one narrow exception for an older payment
   failure is in [docs/billing.md](docs/billing.md)). Unknown tenants and unhandled event types
   are `ignored`. Past the signature check every answer is 200 `{"status": ...}`, except a malformed event
-  (**400**) and a database error (**500**; Stripe retries it).
+  (**400**), a body over 1 MiB (**413**) and a database failure (**503**; Stripe retries it).
 
 **6. A fail-closed edge.** `require_entitlement` (`app/edge.py`) guards `/v1/usage` and the charges route.
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
-Any error reading the entitlement: **503**, never allowed. A database error later in a request is an ordinary **500**.
+Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`).
+
+**7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and
+exits 0 when the stored rollups agree, 1 on drift, 2 on bad input; `--actuals FILE.jsonl` also compares them with totals from
+another source ([docs/reconcile.md](docs/reconcile.md)). `python -m app.delinquent` lists `past_due` and `canceled` tenants
+with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`) using the edge's own grace rule
+([docs/billing.md](docs/billing.md)).
+
+**8. A platform adapter, not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
+response (chat, embeddings or the final stream chunk) into one usage event, with the response id as the idempotency key; a
+missing usage raises and is never counted as zero. It was built from the public API documentation and tested with
+hand-written fixtures, the real app and a local stand-in server. No call to the real service has been made: there is no key.
+[docs/seekrflow.md](docs/seekrflow.md) lists what was and was not verified.
 
 ## API
 
@@ -70,7 +83,7 @@ Any error reading the entitlement: **503**, never allowed. A database error late
 | GET | `/healthz` | 200 `{"status": "ok"}` | none; no edge check |
 | POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 422; edge 401, 402, 503 |
 | GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros}` | 403, 409, 422; edge 401, 402, 503 |
-| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 500, 503; no edge check, the signature is the check |
+| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503; no edge check, the signature is the check |
 
 ## Run it
 
@@ -90,13 +103,16 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   (it deletes the data) and start again.
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
-`DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`. To test against your own database:
+`DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS` and `LOG_LEVEL` (default `INFO`; an invalid value falls back to it). To test against your own database:
 `DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
 on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
+How it is tested, with a burst check and a database outage check you can run on a live stack, and what is not covered: [docs/testing.md](docs/testing.md).
 
 ## Not built
 
-- Reconciliation of estimated against actual usage.
+- Correcting drift: `app.reconcile` reports a difference and changes nothing.
+- Any call to the inference platform the adapter is written for (no key), and its per-model prices: the prices in the tests are illustrative.
+- Cluster manifests, a dashboard, late adjustments and the other items listed in [docs/design-notes.md](docs/design-notes.md).
 - Pushing usage to Stripe, invoices, or any call to Stripe.
 - Real authentication: the tenant comes from the `X-Tenant-Id` header, which anyone can send.
 - A test-mode guard: `livemode` is never read, so the service is test-mode only because the compose file sets a
