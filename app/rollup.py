@@ -8,12 +8,16 @@ per-hour advisory lock (see docs/ingest.md).
 CLI: `python -m app.rollup` closes every due hour once; `--every SECONDS` repeats forever.
 """
 import argparse
+import logging
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
 import psycopg
 
 from app import db
+
+log = logging.getLogger(__name__)
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 HOUR = timedelta(hours=1)
@@ -84,33 +88,48 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int
 
 
 def close_due_hours(
-    conn: psycopg.Connection, now: datetime, grace: timedelta = DEFAULT_GRACE
+    conn: psycopg.Connection, now: datetime, grace: timedelta = DEFAULT_GRACE, failed: list[datetime] | None = None
 ) -> list[tuple[datetime, int, int]]:
     """Close every unclosed hour with events that ended at least `grace` before `now`, oldest first.
 
-    Returns (hour_start, rows written, events counted) for each hour this call closed.
+    Returns (hour_start, rows written, events counted) for each hour this call closed. One hour that fails (for
+    example a BIGINT overflow) is rolled back, logged at ERROR with its hour, appended to `failed` and skipped, so
+    it cannot block the hours after it; the next run retries it. Hours may close out of order: an unclosed earlier
+    hour does not make a later event late, because lateness is judged per hour.
     """
     _require_aware(now, "now")
     hours = [r["hour_start"] for r in conn.execute(DUE_HOURS, {"cutoff": now - grace}).fetchall()]
     conn.commit()
     closed = []
     for hour in hours:
-        result = close_hour(conn, hour)
+        try:
+            result = close_hour(conn, hour)
+        except Exception as err:  # close_hour has rolled back: nothing of this hour is written
+            log.error("rollup failed: hour=%s error=%r", hour.astimezone(timezone.utc).isoformat(), err)
+            if failed is not None:
+                failed.append(hour)
+            continue
         if result is not None:  # None: another process closed it first
             closed.append((hour, *result))
     return closed
 
 
-def run_once() -> None:
-    conn = db.connect()
+def run_once() -> list[datetime]:
+    """Close every due hour once and print the result. Returns the hours that failed."""
+    failed: list[datetime] = []
+    conn = db.connect(statement_timeout_ms=0)  # no statement timeout: a large hour legitimately takes long
     try:
-        closed = close_due_hours(conn, datetime.now(timezone.utc))
+        closed = close_due_hours(conn, datetime.now(timezone.utc), failed=failed)
     finally:
         conn.close()
     for hour, rows, events in closed:
         print(f"closed hour={hour.astimezone(timezone.utc).isoformat()} rows={rows} events={events}", flush=True)
-    if not closed:
+    if failed:
+        hours = ", ".join(h.astimezone(timezone.utc).isoformat() for h in failed)
+        print(f"rollup: closed {len(closed)} hours, failed {len(failed)}: {hours}", flush=True)
+    elif not closed:
         print("nothing due", flush=True)
+    return failed
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -119,11 +138,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.every is not None and args.every <= 0:
         parser.error("--every must be a positive number of seconds")
-    run_once()
-    while args.every:
+    failed = run_once()
+    while args.every:  # a failed hour is logged every cycle and never stops the loop
         time.sleep(args.every)
-        run_once()
+        failed = run_once()
+    if failed:
+        sys.exit(1)  # one-shot run: a cron or the restart policy must see that an hour failed
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     main()
