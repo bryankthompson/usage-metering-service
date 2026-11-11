@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from app import db
+from app import db, mirror
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ SELECT tenant_id, model, %(hour)s, sum(tokens_in), sum(tokens_out), count(*)
 FROM usage_events
 WHERE occurred_at >= %(hour)s AND occurred_at < %(hour)s + interval '1 hour' AND NOT late
 GROUP BY tenant_id, model
-RETURNING event_count
+RETURNING tenant_id, model, hour_start, tokens_in, tokens_out, event_count
 """
 
 # Hours that have events, are not closed, and ended at least `grace` before now (oldest first).
@@ -64,7 +64,8 @@ def _require_aware(ts: datetime, name: str) -> None:
 def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int] | None:
     """Close one UTC hour. Returns (rollup rows written, events counted), or None if it was already closed.
 
-    Commits (or rolls back and re-raises). Closing an hour twice changes nothing.
+    Commits (or rolls back and re-raises). Closing an hour twice changes nothing. After the commit, when
+    CLICKHOUSE_URL is set, the rows are copied to ClickHouse; that copy can fail without failing the close (app/mirror.py).
     """
     _require_aware(hour_start, "hour_start")
     hour = hour_start.astimezone(timezone.utc)
@@ -84,6 +85,7 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int
     except Exception:
         conn.rollback()
         raise
+    mirror.mirror_rows(hour, written)  # best effort, after the commit: never raises, never touches the close
     return len(written), sum(r["event_count"] for r in written)
 
 

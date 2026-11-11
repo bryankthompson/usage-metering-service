@@ -1,6 +1,6 @@
 # Design notes: what is built, where more would attach, what was cut
 
-Nothing in the sections "Where things would attach" and "A day against a week" is built. Each item is marked NOT BUILT
+Nothing in the sections "Where things would attach" and "A day against a week" is built, except the ClickHouse mirror. Each other item is marked NOT BUILT
 and tied to the line in the existing code where it would attach. The "estimate" sizes are guesses, not measurements.
 
 ## 1. What is built, and the one rule behind it
@@ -14,7 +14,7 @@ The rule: write the fact down first, derive everything else from it, and when un
   the INSERT inside `add_price_version`, `app/pricing.py:55-56`; the function starts at :44). Money is integer micro-USD (`docs/billing.md`).
 - **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`require_entitlement`, `app/edge.py:52-64`).
 
-## 2. Where things would attach (NOT BUILT)
+## 2. Where things would attach (NOT BUILT, except the columnar store)
 
 **A queue or stream in front of ingest.** The seam is the single `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
 (`INSERT_EVENT`, `app/ingest.py:59-66`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
@@ -24,11 +24,12 @@ the shared hour lock taken by the consumer (`lock_hour_shared`, `app/ingest.py:1
 run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
-**A columnar store for rollups at scale.** The seam is `AGGREGATE_HOUR` and the two rollup tables (`app/rollup.py:30-37`,
-`db/001_usage.sql`). After `close_hour` commits (`conn.commit()`, `app/rollup.py:83`), the same rows would be written to the columnar
-store (a dual write). What stays: the log remains the source and the Postgres rollup remains the bill. Comparison: export the
-columnar totals as the JSON lines file `app.reconcile --actuals` already reads (`docs/reconcile.md`); drift above tolerance exits 1.
-Failure added: the second write can fail after the first commits, so it needs its own retry and the reconcile run is the detector.
+**A columnar store for rollups at scale (BUILT as an optional mirror, not at scale).** After `close_hour` commits (`conn.commit()`,
+`app/rollup.py`) the same rows are written to ClickHouse when `CLICKHOUSE_URL` is set (`app/mirror.py`, `docs/clickhouse.md`). The log
+stays the source and the Postgres rollup stays the bill. Limits: a derived copy, best effort at close time (a failure is logged and
+never touches the close), recovered by `python -m app.mirror --backfill`, no authentication on the local ClickHouse, single node.
+Comparison: `--export-actuals` writes the totals as the file `app.reconcile --actuals` reads; drift above tolerance exits 1. Not
+built: any run at data volumes where the columnar store matters, a schedule for backfill, deleting rows from ClickHouse.
 
 **Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
 `restart: unless-stopped` (`compose.yaml:15-20`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
@@ -77,6 +78,6 @@ the demo and, later, reconcile. A further week would buy the items below. Sizes 
 | Late adjustments | The rule (credit or debit on a later invoice) is not designed. | 3 to 4 | A late event for a closed hour produces one adjustment line on the next period's charges, once, and a resend adds none. |
 | Payment-provider push | Test mode only; needs the pushed-hours table and retry rule. | 3 to 5 | A provider that fails the first call and succeeds the second receives one usage record per hour, identified by its idempotency identifier. |
 | A queue | No load figure exists that shows Postgres alone is not enough. | 3 to 4 | Publish the same event twice and kill the consumer mid-batch: the log holds one row per key. |
-| A columnar store | No data volume that needs it. | 4 to 5 | After a dual-written period, `app.reconcile --actuals` against the columnar export exits 0; an altered row exits 1. |
+| A columnar store at scale | The small mirror is built (`docs/clickhouse.md`); no data volume needs it yet. | 4 to 5 | After a dual-written period at volume, `app.reconcile --actuals` against the columnar export exits 0; an altered row exits 1. |
 | A cluster deployment | Compose was enough to demo; manifests would be untested guesses. | 3 to 5 | Kill the API and the rollup pod: both come back, the rollup closes the hour once, `/v1/usage` answers again. |
 | A usage dashboard | No query API over rollups exists (`README.md`, "Not built"). | 3 to 4 | The dashboard totals for an hour equal `total_micros` from the charges route for the same range. |
