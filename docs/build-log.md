@@ -135,7 +135,7 @@ Entries are written when the event happens. Times are US Central, 2026-11-10 onw
   against the old container (warning printed, 121 tests pass) and a loopback one (no warning), and accepted the
   owed finding as an advisory check that can still miss. The old container is removed once the devs hand off.
 - **17:19** The README lane merged (PR #6) after its review, the lead's extra commit and a clean CI run.
-- **~17:20** The operator asked that the build use the interviewers' own platform and be robust and testable, with adversarial
+- **~17:20** The operator asked that the build use the inference platform the adapter is written for, and be robust and testable, with adversarial
   agents at the final review. The lead put one scope question to the operator (what "their features" means; whether the
   company name may appear; whether an API key exists) and recorded the answers: the adapter module, its tests and its docs
   page may carry the platform name, everything else stays generic; there is no API key, so no call to the real service has
