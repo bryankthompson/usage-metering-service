@@ -230,8 +230,7 @@ within seconds and can be resent. Or `docker compose restart api` (about 5 s): t
 503 `entitlement check unavailable` after 5 s until the db is back. Both measured with a paused db and 50 requests in flight.
 
 ## 12. 413 on /v1/usage
-    python3 -c "print('x'*70000)" > body.json      # any body over 65,536 bytes; creates body.json in the current directory
-    curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @body.json | sed -n '1p;$p'
+    python3 -c "print('x'*70000)" | curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @- | sed -n '1p;$p'
     HTTP/1.1 413 Request Entity Too Large
     {"detail":"request body too large"}
 `/v1/usage` refuses a body over 64 KiB (65,536 bytes is read as usual, 65,537 is a 413), before it reads the body and before any
