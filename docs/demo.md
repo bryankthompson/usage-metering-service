@@ -32,8 +32,10 @@ volume stays on disk (`docker volume ls`) and the new database starts empty. To 
 file; then `docker compose up -d --wait db` (waits for the healthcheck), `docker compose exec -T db psql -v ON_ERROR_STOP=1 -U metering -d metering < data.sql` and `docker compose up -d`.
 If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept and
 not repaired: the demo then fails in its first steps (`relation ... does not exist`, or `FAIL step 3: expected 200,
-got 500`) and the rollup container restarts in a loop. Run `docker compose down -v` (it deletes the demo data) and
-start again.
+got 500`) and the rollup container restarts in a loop. Apply the schema to the running stack, which keeps the data:
+`docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`
+(run twice on a demo stack with data it printed `applied` both times and kept the rows; with a column dropped by hand it
+brought the column back). `docker compose down -v` deletes the demo data and starts from nothing.
 
 ## What it does not do
 

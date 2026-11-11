@@ -134,3 +134,83 @@ Entries are written when the event happens. Times are US Central, 2026-11-10 onw
   test runs in the middle of the hardening round. The lead made that change in one extra commit, ran `scripts/test`
   against the old container (warning printed, 121 tests pass) and a loopback one (no warning), and accepted the
   owed finding as an advisory check that can still miss. The old container is removed once the devs hand off.
+- **17:19** The README lane merged (PR #6) after its review, the lead's extra commit and a clean CI run.
+- **~17:20** The operator asked that the build use the inference platform the adapter is written for, and be robust and testable, with adversarial
+  agents at the final review. The lead put one scope question to the operator (what "their features" means; whether the
+  company name may appear; whether an API key exists) and recorded the answers: the adapter module, its tests and its docs
+  page may carry the platform name, everything else stays generic; there is no API key, so no call to the real service has
+  been or will be made. The lead did not ask the operator the same question again.
+- **17:26** The reconcile lane merged (PR #7): a read-only check that recomputes the rollups with independent SQL and
+  compares them to the stored rows and to an optional file of actual figures (exit 0 clean, 1 drift, 2 bad input). The
+  first lane for it (a Codex session) stalled at a trust prompt that the lead could not answer, so the lead closed it and
+  restarted it as a Claude lane.
+- **17:30** The lead started three more lanes in parallel with the devs' hardening: a delinquent-accounts report, a
+  platform adapter, and a design-notes page, each with a written brief that fixes the files it may touch. The standing advisor
+  ranked the scope before the briefs went out.
+- **17:35** The delinquent report merged (PR #9). DRC reviewed it at high effort because it moves the edge's grace check into a
+  shared helper: 0 findings.
+- **17:36** DRC handed back the adapter lane (platform adapter): 6 found, 4 folded, 1 owed (the file it had added to save a
+  live response was overwritten without a check). The lead found that the saved file was also untested, was named from the
+  remote response id and had left a stray file in the repo during the test run, so the lead made saving opt-in and added two
+  tests instead of guarding the overwrite.
+- **17:38** The attack-ingest lane merged (PR #8). DRC's second look repeated two owed ids on lines that already held the fix.
+  The lead did not run a third review: the advisor agreed to read the diff and run two forced failures, so that a hang fix would
+  be shown to work and not only to pass. A barrier waiting for a fifth party ended in 31 s with BrokenBarrierError; a
+  blocked-wait that never matches ended in 6 s. Both edits were reverted and the tree was clean before the merge. The merge
+  note records the repeated ids as a stale echo that DRC could not confirm, and says that it is the lead's judgement.
+- **17:40** Dev A handed off the billing attack lane: 8 commits, 414 tests, each new rule mutation-checked. Dev B reported that
+  INFO log lines from the `app.*` loggers never reach `docker compose logs api` because nothing configures logging, so a
+  duplicate or ignored webhook leaves no trace on our side. The lead merged main into the lane (463 tests pass) and sent it
+  to DRC at high effort. The logging fix is a separate small lane after it, so the review of a large diff does not restart.
+- **17:45** Dev A pushed the billing attack lane again with the logging fix included (475 tests), and in the same command
+  overwrote the lead's merge-of-main commit on that branch: a fetch had refreshed the force-with-lease it was using. No
+  content was lost (the new head is the same code rebased onto main), but DRC was already reviewing the old head, so the
+  lead re-sent the job for the new range. The lead also made a slip in that message, mistyping the base hash, and sent a
+  correction within a minute. Both are recorded here: the typo was caught by DRC, whose reply said that the base it was given did not resolve.
+- **17:50** The adapter lane merged (PR #10) with a merge note that names the owed id (the spool file), says it was removed
+  and not fixed, and says that the repeated ids from DRC's second look were not confirmed. The advisor asked for a test of the
+  redirect rule that had none: two stand-in servers, a 302 from the first to the second; with redirects switched back on the
+  test fails because the key reaches the second server.
+- **18:00** DRC handed back the billing attack lane: 6 found, 1 folded (price versions compared in local wall-clock time,
+  which bills a daylight-saving fall-back hour at the wrong price), 4 owed. The lead fixed one (a price version no Python date
+  can hold broke every bill; test first, failing with the database's own error), and the advisor said that a documented
+  limit was wrong for another: a cancel for a stored row whose id the new rule refuses was ignored, and a lost cancel is
+  never retried, so the tenant would stay active. Both fixes have tests written first. The advisor also found that the folded
+  fix had no test, since the default test session runs in UTC where the bug cannot show; the lead added a New York-session test
+  and removed the fix once to watch it fail. Running the whole suite under a New York session zone then failed 16 of 507 tests:
+  mostly tests that compare local clock hours (a test assumption), and one real effect (a year-1 event is a 500 west of UTC).
+  It is written down in `docs/billing.md` as a limit.
+- **18:00 and 18:07** The testing guide (PR #12, 4 script fixes folded by DRC, none owed) and the billing attack lane (PR #11)
+  merged. The design notes (PR #13, 18:14) and the code tour (PR #14, 18:19) followed.
+- **18:20** The lead started four red-team lanes (money, concurrency, security, operations) on the merged code. Each is read-only
+  toward the product, must prove a finding with a command or a failing test, and reports by 20:15; a fifth lens, claims against
+  code from a clean clone, runs after the docs land.
+- **18:20 to 18:35** The four red-team reports came back within about 15 minutes of the launch: 0 blockers and 9 major findings,
+  every one with a repro (in-process attacks on the real database, or a live compose stack). They were: a price change inside
+  an hour billed at the old price while the docs said otherwise; a back-dated price version changing a bill already shown; one
+  unpriced model failing a whole range; a same-second event undoing a cancel (found independently by two lenses); a
+  usage body of 600 MB buffered before the 401; ingest waiting without a timeout for an hour lock, so 40 waiters froze
+  `/healthz`; a paused database hanging every request instead of answering 503; and one poisoned rollup hour blocking all later
+  hours while charges returned 200 with a total of 0. The lead sorted them into fixes (tie rule, lock timeout, body cap,
+  database timeouts, per-hour isolation in the rollup, a flag for unclosed hours, a range cap) and docs that say what the
+  code does (the price takes effect at the start of the hour; no bill is stored; charges cover closed hours only), and sent
+  them to the devs and one new lane as separate small branches, so that review did not queue behind one large diff. The
+  lead did not accept two suggestions: refusing back-dated prices (a correction is a legitimate use; documented instead) and
+  refusing the public placeholder webhook secret (it is fake on purpose and the README says so).
+- **18:32** The runbook merged (PR #15). Dev B had run each of its commands on a live stack.
+- **18:37 to 19:24** The fixes went through DRC and the gate one small branch at a time: the cancel tie rule (#16, DRC 0 found,
+  18:37), the database timeouts and per-hour rollup isolation (#17, DRC at high, 2 found, 1 folded: the statement timeout is
+  set on the session, so options in the connection URL survive; 1 owed, written down as a limit, 18:46), the lock timeout and
+  the request body cap (#21, DRC at high, 3 found, 2 folded: the cap is looked up by the route path behind a prefix, and a
+  test helper always closes its connection; 19:01), reconcile's blind spots (#18, 19:06), the charges guards (#22, 19:09),
+  the container user and a pinned uv (#19, 19:12), a corrected timing sentence (#20, 19:20) and a quoting fix in
+  reconcile's output (#23, 19:24). DRC's finding on #21 was a bypass behind a path prefix; the lead added the test that
+  fails when the fold is reverted, because the fold had none.
+- **18:50** A slip on the lead's side: the DRC job for #21 named a base that the lane did not contain (the lane held an
+  older main), and DRC refused it at intake. The lead merged main into the four waiting lanes and resent the job.
+- **19:12 to 19:23** Round two of the red-team: the four lenses re-ran their own repros against the fixed code and attacked
+  the fixes. 0 blockers. Fixed from it: model and tenant names in the reconcile report (#23). Written down as limits and not
+  fixed: a charges range that cuts an hour, the 100-hour cap of `unclosed_hours` (no truncation flag), the shared clock for
+  invoice and subscription events (a cancel older than an applied payment failure is stale; bounded by the grace window), a
+  frozen database mid-query, the exclusive lock during a very large close. In progress when this was written: a named volume
+  for Postgres (the data was in an anonymous volume, so `docker compose down` then `up` started an empty database).
