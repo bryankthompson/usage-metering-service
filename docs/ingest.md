@@ -2,7 +2,8 @@
 
 Stores one usage event in the `usage_events` table (`db/001_usage.sql`) behind the edge check `require_entitlement`, which
 reads the entitlement on its own connection (the handler uses a second one). A trigger refuses UPDATE and DELETE on the table;
-the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger).
+the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). In compose the
+application connects as that superuser, so the trigger guards against mistakes, not against the service's own credentials.
 
 Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars each, no NUL character), `tokens_in` and `tokens_out` (integers 0 to 10^12), `occurred_at` (ISO 8601 text with a time zone, UTC year 1 to 9999; a number is refused, not read as Unix seconds). The 200-char cap keeps these columns inside Postgres's index key limit: an oversized `model` would be stored and then stop the rollup from closing any later hour.
 

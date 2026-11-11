@@ -48,8 +48,8 @@ LOCK_WAIT = "2s"        # how long a request waits for a lock before it answers 
 def limit_lock_wait(conn: psycopg.Connection) -> None:
     """For the rest of the current transaction, a wait for any lock longer than LOCK_WAIT raises LockNotAvailable.
 
-    A request that waits for a held lock pins a worker thread and a connection; about 40 of them hang the whole API
-    (healthz included). The error is a psycopg.OperationalError, so it is answered 503 with Retry-After, and the same
+    A request that waits for a held lock pins a worker thread and a connection; about 40 of them used up the worker pool, so
+    every other database route waited with them (`/healthz` is async and keeps answering). The error is a psycopg.OperationalError, so it is answered 503 with Retry-After, and the same
     request can be resent: nothing of the failed attempt is committed. Same as SET LOCAL lock_timeout.
     """
     conn.execute("SELECT set_config('lock_timeout', %s, true)", (LOCK_WAIT,))
