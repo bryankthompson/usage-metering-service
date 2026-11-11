@@ -110,3 +110,21 @@ def test_a_declared_content_length_over_the_cap_is_refused_without_reading_a_byt
              "server": ("test", 80), "client": ("test", 1)}
     asyncio.run(app(scope, receive, send))
     assert next(m["status"] for m in sent if m["type"] == "http.response.start") == 413
+
+
+def test_the_cap_still_applies_behind_a_proxy_that_mounts_the_app_under_a_prefix():
+    # Behind a proxy with a path prefix the server sets root_path="/m" and path="/m/v1/usage"; the route is still /v1/usage.
+    async def receive():
+        raise AssertionError("the body was read although Content-Length already said it was too large")
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "path": "/m/v1/usage",
+             "raw_path": b"/m/v1/usage", "query_string": b"", "root_path": "/m", "scheme": "http",
+             "headers": [(b"content-type", b"application/json"), (b"content-length", str(CAP + 1).encode())],
+             "server": ("test", 80), "client": ("test", 1)}
+    asyncio.run(app(scope, receive, send))
+    assert next(m["status"] for m in sent if m["type"] == "http.response.start") == 413
