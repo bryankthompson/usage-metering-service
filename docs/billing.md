@@ -67,7 +67,7 @@ reached, so a cancel for it is not lost.
 
 | Event | Effect |
 |---|---|
-| `customer.subscription.created/updated/deleted` | `plan` = Stripe price id. `active`/`trialing` -> `active`, clears the failure and grace. `past_due` -> `past_due`, keeps an existing grace window. Any other status -> `canceled`. `deleted` is always `canceled`, whatever status its payload carries. A cancel clears the failure and the grace window, so a later `past_due` event starts with none. |
+| `customer.subscription.created/updated/deleted` | `plan` = Stripe price id. `active`/`trialing` -> `active`, clears the failure and grace. `past_due` -> `past_due`, keeps an existing grace window. Any other status -> `canceled`. `deleted` is always `canceled`, whatever status its payload carries. A cancel clears the failure and the grace window, so a later `past_due` event starts with none. A `deleted` for the stored subscription id is never `stale` (below). |
 | `invoice.payment_failed` | `past_due`, `payment_failed_at` = event `created`, `grace_until` = that + `GRACE_PERIOD_HOURS` (default 72). A `canceled` tenant stays canceled. |
 
 Grace runs from the first failure of a delinquency THAT ARRIVES. Stripe retries a failed invoice for days, so a later
@@ -79,7 +79,10 @@ subscription event clears the window; the next failure starts a new one. `invoic
 
 Each event id is recorded in `stripe_events` in the same transaction as the change; a redelivery is 200 `duplicate`.
 An event older than `last_event_at` does not overwrite newer state (200 `stale`); the clock is shared by invoice and
-subscription events, which can make a cancel stale (see "Assumptions and limits"). Events with the same `created` second
+subscription events. The exception is a `customer.subscription.deleted` whose subscription id equals the one stored on the
+tenant: it is terminal, so it is applied whatever `last_event_at` says (a payment failure created after the cancel and applied
+first does not hide it), and `last_event_at` keeps the larger value. A delete of another id, or for a tenant with no stored id,
+is judged by the clock (see "Assumptions and limits"). Events with the same `created` second
 apply in arrival order (Stripe's `created` has one-second resolution and gives no order inside a second), with one rule:
 **a tie never undoes a cancel.** A `customer.subscription.created/updated` whose `created` equals the `last_event_at` of
 a `canceled` tenant is `stale` and logged (`webhook tie after cancel`), so a late `updated(active)` of the cancel's own
@@ -135,21 +138,11 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **A far-future `created` pins a tenant.** `last_event_at` takes the event's `created`, and a later event with an earlier
   `created` is `stale`. A signed event dated far in the future (a Stripe clock fault) would make real events stale for that tenant
   until the row is repaired. Not tested.
-- **A cancel older than an applied payment failure is lost** (found by red-team review, RT-concurrency-4).
-  `invoice.payment_failed` and the `customer.subscription.*` events share one `last_event_at`. If a failure with `created`
-  1001 is applied first and a `customer.subscription.deleted` with `created` 1000 arrives after it, the delete is `stale`:
-  answered 200 and recorded in `stripe_events`, so Stripe's redelivery is a `duplicate` and cannot bring it back, and the
-  tenant stays `past_due` with its grace window instead of `canceled`. The bound is the grace window: access ends at
-  `grace_until` (72 hours after the failure by default, `GRACE_PERIOD_HOURS`; a repeated failure does not extend it),
-  unless a newer subscription event changes the state first. It needs a failure created AFTER the cancel's own `created`
-  and applied before the cancel. Why the clock is shared: a subscription event older than an applied failure must stay
-  stale, so an older `updated(active)` cannot clear the grace window the failure opened. Why it is not fixed: applying
-  every `deleted` whatever `last_event_at` says would also apply a delete that really is old (the delete of an earlier
-  subscription, delivered after a newer subscribe event), and with one clock the code cannot tell the two apart. A fix
-  needs a second clock (a column for the last subscription event next to `last_event_at`), so that a `deleted` is judged
-  against the last subscription event only while an `updated(active)` is still judged against both; that is a design,
-  not built or tested. Pinned by `test_a_cancel_older_than_an_applied_payment_failure_is_stale_and_access_lasts_until_the_grace_ends`
-  in `tests/test_webhook_ties.py`, which a fix has to change on purpose.
+- **A cancel the stored subscription id does not recognise is judged by the shared clock** (RT-concurrency-4). A `deleted`
+  is applied whatever `last_event_at` says only when its subscription id equals the stored `stripe_subscription_id`. A delete
+  with another id, or for a tenant whose row holds none, that is created before an applied payment failure is `stale`: recorded
+  as handled and not retried, so the tenant stays `past_due` until `grace_until` (72 hours after the failure by default).
+  Assumption, not checked against Stripe: a canceled subscription id is not reopened. Pinned by `tests/test_cancel_order.py`.
 - **Concurrency is tested with threads in one process.** Multi-process behaviour (several uvicorn workers) is not tested; the
   per-tenant advisory lock and the row lock are what it relies on.
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy

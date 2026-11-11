@@ -118,7 +118,13 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     # Serialize per tenant even when no row exists yet, so a concurrent first insert cannot be overwritten by an older event.
     conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (tenant_id,))
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
-    if row and row["last_event_at"] and created < row["last_event_at"]:
+    event_sub_id = _text(sub.get("id"))
+    # A delete of the subscription the row holds is terminal (a canceled subscription id is never reopened), so an
+    # older `created` cannot make it stale: a payment failure created after the cancel and applied first would
+    # otherwise hide it. A delete of another id (an old subscription, delivered late) or a row with no id is judged by the clock.
+    terminal = bool(event["type"] == "customer.subscription.deleted" and row and event_sub_id
+                    and event_sub_id == row["stripe_subscription_id"])
+    if row and row["last_event_at"] and created < row["last_event_at"] and not terminal:
         return "stale", tenant_id
     if (row and row["last_event_at"] == created and row["status"] == "canceled"
             and event["type"] != "customer.subscription.deleted"):
@@ -138,7 +144,8 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     # A field that is missing or unusable keeps the stored value instead of erasing it.
     plan = (_text(price.get("id")) if isinstance(price, dict) else None) or (row and row["plan"])
     customer = _text(sub.get("customer")) or (row and row["stripe_customer_id"])
-    subscription_id = _text(sub.get("id")) or (row and row["stripe_subscription_id"])
+    subscription_id = event_sub_id or (row and row["stripe_subscription_id"])
+    last_event_at = max(created, row["last_event_at"]) if row and row["last_event_at"] else created   # never backwards
     payment_failed_at, grace_until = (row["payment_failed_at"], row["grace_until"]) if row else (None, None)
     if status in ("active", "canceled"):               # a cancel leaves no grace window to revive later
         payment_failed_at = grace_until = None
@@ -151,7 +158,7 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
         " payment_failed_at = EXCLUDED.payment_failed_at, grace_until = EXCLUDED.grace_until,"
         " last_event_at = EXCLUDED.last_event_at, updated_at = now()",
         {"t": tenant_id, "c": customer or None, "s": subscription_id or None, "p": plan or None, "st": status,
-         "pf": payment_failed_at, "g": grace_until, "le": created})
+         "pf": payment_failed_at, "g": grace_until, "le": last_event_at})
     return "processed", tenant_id
 
 
