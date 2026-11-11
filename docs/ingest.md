@@ -14,7 +14,7 @@ Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars 
 | 403 | body `tenant_id` is not the tenant the edge admitted |
 | 401 / 402 / 503 | the edge refused, nothing stored: no `X-Tenant-Id` header / no usable entitlement / entitlement check failed (see `docs/billing.md`) |
 | 503 | the database went away after the edge check: nothing is confirmed stored, and resending the same key is safe |
-| 503 + `Retry-After: 1` | the request waited 2 seconds (`db.LOCK_WAIT`) for a lock, usually the hour's lock while that hour is being closed: nothing is stored, resend the same key |
+| 503 + `Retry-After: 1` | the request waited 2 seconds (`db.LOCK_WAIT`) for a lock, usually the hour's lock while that hour is being closed: nothing is stored, resend the same key (a resend after the hour is closed is stored as late and not billed) |
 | 413 | the body is over 64 KiB (an event is a few hundred bytes). Refused from `Content-Length`, or while the stream arrives if there is none, before the body is parsed and before the edge runs, so an oversize body gets 413 whether or not it has credentials |
 | 422 | invalid body (naive or numeric timestamp, text too long or with a NUL, a count out of range). The body lists `type`, `loc` and `msg` only, never the input: echoing it made a `NaN` or a lone surrogate a 500 |
 
@@ -71,6 +71,17 @@ The hour stays unclosed and is retried every run until the columns are widened t
 **A failed hour** is logged at ERROR as `rollup failed: hour=<UTC hour> error=...` (no tenant) and the later hours still close.
 The one-shot run prints `rollup: closed N hours, failed M: <hours>` and exits 1; with `--every` the loop keeps sleeping and logs it every cycle.
 Find it with `docker compose logs rollup | grep "rollup failed"`. Hours may close out of order; that never makes an event late.
+
+**Known limit: one very large hour.** Closing an hour holds its exclusive lock for the whole close, and the close has no
+lock timeout by design. The red team measured a 12M-row hour: the close took 23.8 s, and 160 of the 1,226 ingests for THAT
+hour (13 %) waited past the 2 s lock wait and answered 503 with `Retry-After: 1`; ingests for another hour in the same run:
+1,979 accepted, 0 refused. With a 4M-row hour (the run took 3.4 s) none was refused (these figures are the red team's, not
+repeated here). A refused ingest stores nothing, and a resend during the close waits and is refused again. A resend after the
+close is accepted (201) but stored as `"late": true`, because the hour is closed by then, so it is never billed (run: hold the
+hour's lock, ingest gives 503, release, `close_hour`, resend gives 201 with `late: true` and the event is in no rollup row). A
+client that does not resend loses the event as well. Not tested: an ingest transaction left `idle in transaction` while it
+holds the shared hour lock would block that hour's close for as long as it stays open (the closing side has no timeout:
+`test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight`), and no `idle_in_transaction_session_timeout` is set.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
 so a database that stops accepting connections, or answers slowly, is a 503 and `/healthz` keeps answering.
