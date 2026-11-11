@@ -164,8 +164,8 @@ notes, the code tour, the runbook, the testing guide, the hardening fixes and fo
 independent review desk (DRC) had reviewed that exact head, and the CI check `test` was green. The cockpit's merge
 command refuses without the review receipt for that head, a head that contains the latest `main`, and green CI; when the
 reviewer left a finding owed, it also wants the lead's written note on it. Each merge moved `main` and made the next
-branch stale, so the lead merged `main` into each waiting branch, re-ran the tests and merged one lane at a time:
-@@PRS@@ pull requests, @@TESTS@@ tests at the end.
+branch stale, so the lead merged `main` into each waiting branch, re-ran the tests and merged one lane at a time, each
+as its own pull request (`git log --first-parent --merges` lists them).
 
 **Hardening.** Twice the lead ran adversarial agents: four read-only red-team lanes (money, concurrency, security,
 operations), each told to break the code on its own lens and to count a finding only with a command or a failing test
