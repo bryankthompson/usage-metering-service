@@ -41,7 +41,8 @@ arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates ea
 force at the start of its hour, so a price change applies from the first hour that starts at or after its effective time
 (a version effective at 10:30 applies from the 11:00 hour). Nothing stores a bill. Charges cover closed hours only:
 `unclosed_hours` in the answer lists the hours in the range that hold usage but are not closed yet (the earliest 100), so a
-total with a non-empty list is partial. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
+total with a non-empty list is partial (100 entries means at least 100). Use `start` and `end` on UTC hour boundaries: an
+hour is in or out of a range by its start, so a range that cuts an hour includes or drops all of it. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
 not ISO 8601 text, `start >= end`, or a range wider than 366 days, **409** when a row has no price in force (the message
 names every model without one, with its first hour). Details: [docs/billing.md](docs/billing.md).
 

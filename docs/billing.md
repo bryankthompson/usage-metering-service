@@ -31,7 +31,8 @@ Charges cover closed hours only. Usage in an hour that has not been rolled up ye
 to about 65 minutes: the 5-minute grace plus one run of the hourly rollup loop) is not in `total_micros`. The response says
 which hours those are: `unclosed_hours` lists the hours that start inside the range, hold usage that is not late and have no
 `closed_hours` row (the earliest 100, oldest first, the current hour included; `[]` when nothing is waiting). The total is
-complete only when the list is empty. This is also how a stuck rollup shows on the bill side: an older hour that stays in the
+complete only when the list is empty (a list of exactly 100 means at least 100 hours are waiting; there is no flag for the
+cut, because any non-empty list already says the total is partial). This is also how a stuck rollup shows on the bill side: an older hour that stays in the
 list long after its 65 minutes is one the rollup cannot close (see the rollup log), and every later hour is billed without it.
 Model names are compared byte for byte: `GPT`, `gpt` and `GPT ` are three models, each needing its own price.
 Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes, a number instead of ISO text,
@@ -115,6 +116,12 @@ sets how much of the `app.*` loggers is shown. A value that is not one of those 
 
 ## Assumptions and limits
 These are known and not fixed; see also the two assumptions above (one customer per tenant, one subscription per tenant).
+- **A `start` or `end` that is not on a UTC hour boundary cuts no hour.** Rows are whole hours and the range test is on the
+  hour's start, so `start=10:30` leaves out the whole 10:00 hour (an event at 10:45 is in the window and not in the bill),
+  and `end=10:30` includes the whole 10:00 hour (usage after 10:30 is billed). `unclosed_hours` uses the same test and
+  does not flag it. Ask for ranges on hour boundaries; two adjacent ranges that split at one never count an hour twice.
+  Found by review; a `422` for a range off the boundary was considered and not built (a read-only request with a
+  re-askable answer, and a caller in a +05:30 zone would be refused its own local day).
 - **A tenant is not bound to a Stripe customer.** A subscription event for tenant X overwrites X's stored customer id
   with the event's. Repro: post a signed `customer.subscription.updated` for `victim` with customer `cus_victim`, then
   another for `victim` with customer `cus_other`; a later `invoice.payment_failed` for `cus_victim` is `ignored`, so the
