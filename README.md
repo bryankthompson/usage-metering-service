@@ -34,8 +34,9 @@ never both and never neither. Details and the known limit: [docs/ingest.md](docs
 1,000,000). A new price is a new version; a database trigger rejects changing or deleting a stored one.
 `price_at` picks the version in force at a time, and raises `NoPrice` when there is none: a missing price
 is never rated as zero. A rate is `(tokens_in * input_price + tokens_out * output_price) / 1000` in integer
-arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at its
-own hour, so a price change mid-period applies from its effective time. **403** for another tenant, **422**
+arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at the price in
+force at the start of its hour, so a price change applies from the first hour that starts at or after its effective time
+(a version effective at 10:30 applies from the 11:00 hour). Charges cover closed hours only and nothing stores a bill. **403** for another tenant, **422**
 for a naive timestamp, a `start` or `end` that is not ISO 8601 text, or `start >= end`, **409** when a row has no price in force. Details:
 [docs/billing.md](docs/billing.md).
 
@@ -46,10 +47,12 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
   `subscription.metadata.tenant_id`: `active` and `trialing` become `active` (clearing any failure and grace
   period), `past_due` becomes `past_due` and keeps an existing grace period, any other Stripe status becomes
   `canceled`, and `.deleted` is always `canceled`. One subscription per tenant is assumed: deleting any
-  subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one.
+  subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one. An event
+  that shares the second of a cancel never reactivates the tenant (Stripe's `created` has one-second resolution and
+  delivery order is not guaranteed); a strictly newer `active` event does.
 - `invoice.payment_failed` finds the tenant by the customer id an earlier subscription event stored (an
   unknown customer is `ignored`), sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
-  from the first failure: Stripe's retries of the same failed invoice do not extend it, and an `active`
+  from the first failure that arrives: Stripe's retries of the same failed invoice do not extend it, and an `active`
   subscription event clears it. It does not reopen a `canceled` tenant. If `GRACE_PERIOD_HOURS` is not an
   integer from 0 to 8760, a failure that has to open a grace window is **503** and not recorded, so Stripe
   retries it; other events are unaffected.
