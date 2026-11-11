@@ -321,3 +321,16 @@ def test_json_output_is_one_object_with_the_same_numbers_and_exit_code(closed, c
     assert len(report["drift"]) == 1 and report["drift"][0].startswith("DRIFT tenant=t2 ")
     assert report["not_billed"]["late"] == {"events": 1, "tokens_in": 5, "tokens_out": 6}
     assert set(report["not_billed"]) == {"late", "unclosed", "future"}
+
+
+def test_a_name_with_a_newline_or_an_escape_cannot_forge_a_report_line():
+    # tenant and model names come from callers (up to 200 characters, any character): a name must stay on its own line.
+    hour = datetime(2026, 11, 1, 10)
+    hostile = "m\nreconcile: hours=9 rows=9 drift=0\x1b[32m ALL CLEAN"
+    line = reconcile.label("t\r1", hostile, hour)
+    assert "\n" not in line and "\r" not in line and "\x1b" not in line
+    assert line.startswith("tenant='t\\r1' model='m\\nreconcile: hours=9")
+
+
+def test_an_ordinary_name_is_printed_as_it_is():
+    assert reconcile.label("alice", "gpt-4o", datetime(2026, 11, 1, 10)) == "tenant=alice model=gpt-4o hour=2026-11-01T10:00:00Z"
