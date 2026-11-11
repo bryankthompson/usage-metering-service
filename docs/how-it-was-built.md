@@ -165,9 +165,9 @@ is below, each from their own words in the session, and each changed what was bu
 - **The job and the rules, before any code.** A small usage-metering and billing service, a prototype due the next
   morning; money in integers; no real payment keys; nothing taken from an earlier coding test; the README may claim only
   what the code does.
-- **How the work is checked.** Independent review and a green CI check on every merge, and the repo private while it was
-  built. The operator also said that the way the sessions work together is part of what the build is meant to show, so the
-  build log is kept as it happens.
+- **How the work is checked.** Independent review and a green CI check on every merge, and the repo was private while it
+  was built; it was made public on 2026-11-10. The operator also said that the way the sessions work together is part of
+  what the build is meant to show, so the build log is kept as it happens.
 - **What the platform adapter may be.** It is named only in its own files, it runs on recorded responses because there was no
   API key, and no live call is ever claimed (build log 17:20).
 - **The bar at the end (17:20).** The build should use the platform of the people it is for, have a way to be tested, be
@@ -177,5 +177,6 @@ is below, each from their own words in the session, and each changed what was bu
   working, directed by the lead; that is why the work ran as many small parallel lanes.
 - **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
   describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
-- **Still open at the time of writing.** The repo's name, whether it is public, and a read of the final head by the operator.
+- **Still open at the time of writing.** The repo's name stays generic; it has been public since 2026-11-10. The
+  operator's read of the final head is still pending.
   This page will not say the read happened until it has.
