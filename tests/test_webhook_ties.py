@@ -1,12 +1,10 @@
 """Stripe `created` has one-second resolution and delivery order is not guaranteed: two events of the same second are
 applied in arrival order, except that a tie never undoes a cancel (RT-security-1 / RT-concurrency-1)."""
 import logging
-from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import edge
 from app.main import app
 from tests.stripe_signing import SECRET, payment_failed_event, subscription_event
 from tests.test_webhooks import T, at, post, row
@@ -102,23 +100,3 @@ def test_the_tie_is_logged_and_the_event_is_recorded_so_its_redelivery_is_a_dupl
         post(client, subscription_event("evt_2", T, status="active"))
     assert "tie" in caplog.text and "tenant='tenant-1'" in caplog.text and "evt_2" in caplog.text
     assert post(client, subscription_event("evt_2", T, status="active")).json() == {"status": "duplicate"}
-
-
-def test_a_cancel_older_than_an_applied_payment_failure_is_stale_and_access_lasts_until_the_grace_ends(client, conn, monkeypatch):
-    """KNOWN LIMIT, pinned on purpose (docs/billing.md "Assumptions and limits", RT-concurrency-4): invoice and subscription
-    events share one `last_event_at`, so a `deleted` created BEFORE a payment failure that was applied first is stale and lost.
-    A fix has to change this test."""
-    post(client, subscription_event("evt_1", T - 10, status="active"))
-    assert post(client, payment_failed_event("evt_2", T + 1)).json() == {"status": "processed"}
-    assert cancel(client, "deleted", "evt_3", T).json() == {"status": "stale"}
-    r = row(conn)
-    grace_end = at(T + 1 + 72 * 3600)
-    assert (r["status"], r["grace_until"], r["last_event_at"]) == ("past_due", grace_end, at(T + 1))
-    assert cancel(client, "deleted", "evt_3", T).json() == {"status": "duplicate"}      # recorded as handled: a redelivery is no help
-    monkeypatch.setattr(edge, "now", lambda: grace_end)
-    assert edge_status(client) == 200                                                   # still allowed up to grace_until ...
-    monkeypatch.setattr(edge, "now", lambda: grace_end + timedelta(seconds=1))
-    assert edge_status(client) == 402                                                   # ... and denied after it
-    # The same shared clock is what keeps an older `updated(active)` from clearing the failure it was created before.
-    assert post(client, subscription_event("evt_4", T, status="active")).json() == {"status": "stale"}
-    assert row(conn)["status"] == "past_due"

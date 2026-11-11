@@ -21,10 +21,13 @@ def event(event_id: str, event_type: str, created: int, obj: dict) -> bytes:
 
 def subscription_event(event_id: str, created: int, tenant_id: str | None = "tenant-1", status: str = "active",
                        customer: str = "cus_test_1", price: str = "price_test_pro",
-                       event_type: str = "customer.subscription.updated") -> bytes:
-    sub = {"id": "sub_test_1", "object": "subscription", "customer": customer, "status": status,
+                       event_type: str = "customer.subscription.updated", sub_id: str | None = "sub_test_1") -> bytes:
+    """`sub_id=None` leaves the subscription id out of the payload."""
+    sub = {"object": "subscription", "customer": customer, "status": status,
            "metadata": {"tenant_id": tenant_id} if tenant_id else {},
            "items": {"data": [{"price": {"id": price}}]}}
+    if sub_id is not None:
+        sub = {"id": sub_id, **sub}
     return event(event_id, event_type, created, sub)
 
 
