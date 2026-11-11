@@ -14,6 +14,8 @@ Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars 
 | 403 | body `tenant_id` is not the tenant the edge admitted |
 | 401 / 402 / 503 | the edge refused, nothing stored: no `X-Tenant-Id` header / no usable entitlement / entitlement check failed (see `docs/billing.md`) |
 | 503 | the database went away after the edge check: nothing is confirmed stored, and resending the same key is safe |
+| 503 + `Retry-After: 1` | the request waited 2 seconds (`db.LOCK_WAIT`) for a lock, usually the hour's lock while that hour is being closed: nothing is stored, resend the same key |
+| 413 | the body is over 64 KiB (an event is a few hundred bytes). Refused from `Content-Length`, or while the stream arrives if there is none, before the body is parsed and before the edge runs, so an oversize body gets 413 whether or not it has credentials |
 | 422 | invalid body (naive or numeric timestamp, text too long or with a NUL, a count out of range). The body lists `type`, `loc` and `msg` only, never the input: echoing it made a `NaN` or a lone surrogate a 500 |
 
 ## How it stays correct
