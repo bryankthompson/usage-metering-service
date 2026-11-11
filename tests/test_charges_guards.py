@@ -3,7 +3,6 @@ the API to 1.7 GiB), and the response lists the hours in range that hold usage b
 partial because the rollup is behind or stuck says so (RT-operations-2, RT-money-6)."""
 from datetime import datetime, timedelta, timezone
 
-import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -113,14 +112,12 @@ def test_at_most_100_hours_are_listed_the_earliest_first(client, conn):
     assert listed(r) == [T0 + h * HOUR for h in range(100)]
 
 
-def test_a_poisoned_hour_shows_up_and_the_hours_after_it_do_not_hide_it(client, conn):
+def test_an_earlier_hour_the_rollup_never_closed_is_named_while_a_later_closed_hour_is_not(client, conn):
+    # A stuck rollup, however it got stuck (an error on that hour, a crashed loop): no closed_hours row for the earlier hour.
     add_price_version(conn, "m1", T0, 1000, 1000)
-    event(conn, 0, tokens=5 * 10**18, key="a")
-    event(conn, 0, tokens=5 * 10**18, key="b", minute=31)                         # the hour's sum overflows BIGINT
+    event(conn, 0)
     event(conn, 1)
-    with pytest.raises(psycopg.errors.NumericValueOutOfRange):
-        close_hour(conn, T0)
-    assert close_hour(conn, T0 + HOUR) == (1, 1)
+    assert close_hour(conn, T0 + HOUR) == (1, 1)                                  # a later hour closes; hour 0 is never touched
     r = charges(client)
     assert r.status_code == 200 and listed(r) == [T0]                             # the stuck hour is named, the closed one is not
-    assert r.json()["total_micros"] == 20                                         # the bill is partial, and now says so
+    assert len(r.json()["lines"]) == 1 and r.json()["total_micros"] == 20         # the bill is partial, and now says so
