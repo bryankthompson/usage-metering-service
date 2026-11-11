@@ -271,3 +271,11 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   connection in a dependency. Fixed: the charges connection (#38) and, in one docs change, the five review reports in
   `docs/reviews/`, a "Start here" block, the stale lines and three limits written down (#39). A slip is recorded in
   `docs/how-it-was-built.md` section 5 (21:55).
+- **22:05 to about 22:25** A second round of cold readers, with no context, read the tree after #39 and #40. Their findings
+  were fixed in #41: a stale health-check comment in `app/db.py`, a hard-coded pull-request count removed from the docs,
+  and a clarification that the app connects as the database superuser. The operator decided to keep the generic repo name
+  and made the repo public on 2026-11-10 at about 22:25 CST. The state of main at this entry is `dea36c8`. The lead ran,
+  from a clean clone of `dea36c8`, the 610 tests, the demo and the outage check, and all passed. The first demo call came
+  before the API was listening ([the demo guide](demo.md) says to give it a few seconds); the rerun passed.
+  The platform adapter has never run against the live service: there was no API key, so it runs on recorded responses.
+  No person has read the diff, and the operator's read of the money and entitlement code has not happened.
