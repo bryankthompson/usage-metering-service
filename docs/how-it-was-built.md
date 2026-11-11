@@ -79,7 +79,8 @@ Each layer fails in a different way from the others. One example each.
   after those runs: #38 (`a583885`, `05eec07`) changed the charges connection and its test, and `6eacf22` changed a
   docstring in `app/db.py`. The final-code run was the lead's: from a clean clone of `dea36c8`, 610 tests, the demo and
   the outage check passed (the first demo call came before the API was listening; the rerun passed, as
-  `docs/demo.md` says). The only change after `dea36c8` is `a2362ae`, documentation only. The flood, data-kept-across-
+  `docs/demo.md` says). No code changed after `dea36c8`: `git diff dea36c8 main -- app tests scripts compose.yaml
+  Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
   `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
 - **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
   was checked by a person reading the diff.
