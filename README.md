@@ -127,9 +127,9 @@ unprivileged user. If something fails while it runs, start at [docs/runbook.md](
 model, sends a locally signed subscription event, posts usage (with a resend), closes the hour with the rollup
 and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo.md). Two things to know:
 - Wait for the API before you use it. `docker compose up -d --build --wait` (and `scripts/up`) return when the api
-  answers its healthcheck; a plain `up -d` returns at once. On a first start the api also creates the database, so a
-  run that is too early fails: `scripts/demo.sh` prints `FAIL step 3 ... got 000` and `scripts/flood.py` can hit a
-  `ConnectionResetError`. Run it again once the api answers.
+  answers its healthcheck; a plain `up -d` returns before the api answers, so a
+  run that starts too early fails: `scripts/demo.sh` prints `FAIL step 3 ... got 000`, and `scripts/flood.py` hit a
+  `ConnectionResetError` on a first start. Run it again once the api answers.
 - Postgres applies the files in `db/` only when its data volume is first created, so an existing or
   half-built volume (for example after an interrupted first start, or after an upgrade that adds a column) is not
   repaired by `up`. Every file in `db/` is repeatable and the image carries them, so apply them to the running stack
