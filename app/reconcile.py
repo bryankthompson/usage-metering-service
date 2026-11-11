@@ -121,8 +121,14 @@ def read_actuals(path: str) -> dict[tuple[str, str, datetime], tuple[int, int]]:
     return actuals
 
 
+def _plain(name: str) -> str:
+    """A name as it is, unless it holds a newline, an escape or another unprintable character: then repr(), so a
+    caller-chosen tenant or model name cannot start a line of its own in the report."""
+    return name if name.isprintable() else repr(name)
+
+
 def label(tenant: str, model: str, hour: datetime) -> str:
-    return f"tenant={tenant} model={model} hour={hour.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    return f"tenant={_plain(tenant)} model={_plain(model)} hour={hour.strftime('%Y-%m-%dT%H:%M:%SZ')}"
 
 
 def self_check(events: dict, stored: dict) -> list[str]:
