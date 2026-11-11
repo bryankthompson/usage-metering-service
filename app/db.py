@@ -27,8 +27,15 @@ def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) 
     """
     if statement_timeout_ms is None:
         statement_timeout_ms = REQUEST_STATEMENT_TIMEOUT_MS
-    return psycopg.connect(url or database_url(), row_factory=dict_row, connect_timeout=CONNECT_TIMEOUT_S,
-                           options=f"-c statement_timeout={statement_timeout_ms}")
+    conn = psycopg.connect(url or database_url(), row_factory=dict_row, connect_timeout=CONNECT_TIMEOUT_S)
+    try:
+        # A session SET, not the `options` keyword: that would replace any options in the URL or PGOPTIONS.
+        conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(int(statement_timeout_ms)),))
+        conn.commit()
+    except BaseException:
+        conn.close()
+        raise
+    return conn
 
 
 def apply_schema(conn: psycopg.Connection) -> None:
