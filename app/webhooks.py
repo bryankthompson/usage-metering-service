@@ -23,9 +23,20 @@ SUBSCRIPTION_EVENTS = {"customer.subscription.created", "customer.subscription.u
 STATUS_MAP = {"active": "active", "trialing": "active", "past_due": "past_due"}
 
 
+MAX_BODY_BYTES = 1024 * 1024        # a Stripe event is a few KB; 1 MiB leaves room, and the endpoint is public
+
+
 async def raw_body(request: Request) -> bytes:
-    """The request body exactly as sent: the signature covers the raw bytes, not parsed JSON."""
-    return await request.body()
+    """The request body exactly as sent: the signature covers the raw bytes, not parsed JSON.
+
+    Read before the signature is checked, so it is capped: a 600 MB unsigned body took the API to 2.4 GiB of memory.
+    """
+    body = bytearray()
+    async for chunk in request.stream():                     # counted as it arrives, so memory stays near the cap
+        body += chunk
+        if len(body) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="webhook body too large")
+    return bytes(body)
 
 
 def grace_hours() -> int:
@@ -43,17 +54,48 @@ def grace_hours() -> int:
 def verify(payload: bytes, signature: str | None) -> dict:
     """The event as a plain dict, or HTTPException 503 (no secret configured) / 400 (unsigned, bad or stale signature)."""
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    if not secret:
+    if not secret or not secret.strip():                      # a blank secret is no secret: 503, not a "bad signature" 400
         log.error("webhook refused: STRIPE_WEBHOOK_SECRET is not set")
         raise HTTPException(status_code=503, detail="webhook secret not configured")
     if not signature:
         log.warning("webhook refused: no Stripe-Signature header")
         raise HTTPException(status_code=400, detail="missing Stripe-Signature header")
+    if not signature.isascii():
+        # The library compares signatures with hmac.compare_digest, which raises TypeError (a 500) on non-ASCII text.
+        log.warning("webhook refused: Stripe-Signature header is not ASCII")
+        raise HTTPException(status_code=400, detail="invalid signature or payload")
     try:
         return stripe.Webhook.construct_event(payload, signature, secret).to_dict()
-    except (ValueError, stripe.SignatureVerificationError) as err:
+    except (ValueError, AttributeError, RecursionError, stripe.SignatureVerificationError) as err:
+        # Only a body that is correctly signed gets parsed, and the library raises AttributeError for signed JSON that
+        # is not an object (`[]`, `null`, `123`) and RecursionError for JSON nested thousands deep.
         log.warning("webhook refused: %s", err)
         raise HTTPException(status_code=400, detail="invalid signature or payload") from err
+
+
+MAX_TENANT_ID = 200                 # the same limit as tenant_id on POST /v1/usage, so every stored tenant can post usage
+
+
+def _text(value: object) -> str | None:
+    """`value` when PostgreSQL can store it (a str that encodes as UTF-8, without NUL), else None.
+
+    Signed does not mean well-formed: JSON allows a lone surrogate ("\\ud800"), which cannot be encoded."""
+    if not isinstance(value, str) or "\x00" in value:
+        return None
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return value
+
+
+def _tenant_id(value: object) -> str | None:
+    """`value` when the edge and ingest can both admit it: 1 to 200 characters, no ASCII control character, no space or
+    tab at either end (the edge trims those from the header, so such a tenant could never match its own header)."""
+    text = _text(value)
+    if text is None or not 1 <= len(text) <= MAX_TENANT_ID or text != text.strip(" \t"):
+        return None
+    return None if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text) else text
 
 
 def _lock_entitlement(conn: psycopg.Connection, column: str, value: str) -> dict | None:
@@ -62,8 +104,16 @@ def _lock_entitlement(conn: psycopg.Connection, column: str, value: str) -> dict
 
 def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
     sub = event["data"]["object"]
-    tenant_id = (sub.get("metadata") or {}).get("tenant_id")
+    metadata = sub.get("metadata")
+    raw_tenant = metadata.get("tenant_id") if isinstance(metadata, dict) else None
+    tenant_id = _tenant_id(raw_tenant)
+    if not tenant_id and _text(raw_tenant) and conn.execute(
+            "SELECT 1 FROM entitlements WHERE tenant_id = %s", (raw_tenant,)).fetchone():
+        tenant_id = raw_tenant   # a row stored before the id rule (or by hand) stays reachable: a lost cancel is never retried
     if not tenant_id:
+        if raw_tenant is not None:
+            log.warning("webhook ignored: tenant_id %.80r is not usable (1 to %d characters, no control characters, "
+                        "no space or tab at either end)", raw_tenant, MAX_TENANT_ID)
         return "ignored", None
     # Serialize per tenant even when no row exists yet, so a concurrent first insert cannot be overwritten by an older event.
     conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (tenant_id,))
@@ -71,11 +121,19 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
     # A deleted subscription is canceled whatever status its payload carries (fail closed).
-    status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(sub.get("status"), "canceled")
-    items = (sub.get("items") or {}).get("data") or [{}]
-    plan = (items[0].get("price") or {}).get("id") or (row and row["plan"])
+    raw_status = sub.get("status")
+    status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(
+        raw_status if isinstance(raw_status, str) else None, "canceled")
+    items, price = sub.get("items"), None
+    data = items.get("data") if isinstance(items, dict) else None
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        price = data[0].get("price")
+    # A field that is missing or unusable keeps the stored value instead of erasing it.
+    plan = (_text(price.get("id")) if isinstance(price, dict) else None) or (row and row["plan"])
+    customer = _text(sub.get("customer")) or (row and row["stripe_customer_id"])
+    subscription_id = _text(sub.get("id")) or (row and row["stripe_subscription_id"])
     payment_failed_at, grace_until = (row["payment_failed_at"], row["grace_until"]) if row else (None, None)
-    if status == "active":
+    if status in ("active", "canceled"):               # a cancel leaves no grace window to revive later
         payment_failed_at = grace_until = None
     conn.execute(
         "INSERT INTO entitlements (tenant_id, stripe_customer_id, stripe_subscription_id, plan, status,"
@@ -85,13 +143,13 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
         " stripe_subscription_id = EXCLUDED.stripe_subscription_id, plan = EXCLUDED.plan, status = EXCLUDED.status,"
         " payment_failed_at = EXCLUDED.payment_failed_at, grace_until = EXCLUDED.grace_until,"
         " last_event_at = EXCLUDED.last_event_at, updated_at = now()",
-        {"t": tenant_id, "c": sub.get("customer"), "s": sub.get("id"), "p": plan, "st": status,
+        {"t": tenant_id, "c": customer or None, "s": subscription_id or None, "p": plan or None, "st": status,
          "pf": payment_failed_at, "g": grace_until, "le": created})
     return "processed", tenant_id
 
 
 def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
-    customer = event["data"]["object"].get("customer")
+    customer = _text(event["data"]["object"].get("customer"))
     row = _lock_entitlement(conn, "stripe_customer_id", customer) if customer else None
     if row is None:
         return "ignored", None
@@ -112,7 +170,7 @@ def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: dateti
         # not slide the window forward. An active subscription event clears it, so a new delinquency starts afresh.
         conn.execute("UPDATE entitlements SET last_event_at = %s, updated_at = now() WHERE tenant_id = %s",
                      (created, tenant_id))
-        log.info("webhook repeated failure: tenant=%s keeps grace_until=%s", tenant_id, row["grace_until"].isoformat())
+        log.info("webhook repeated failure: tenant=%r keeps grace_until=%s", tenant_id, row["grace_until"].isoformat())
         return "processed", tenant_id
     conn.execute(
         "UPDATE entitlements SET status = 'past_due', payment_failed_at = %s, grace_until = %s,"
@@ -129,6 +187,8 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
     try:
         if not isinstance(event["id"], str) or not isinstance(event["type"], str):
             raise TypeError("event id and type must be strings")
+        if _text(event["id"]) is None:
+            raise ValueError("event id is not storable text (NUL byte or lone surrogate)")
         if not isinstance(event["data"]["object"], dict):
             raise TypeError("event data.object must be an object")
         created = datetime.fromtimestamp(event["created"], tz=timezone.utc)
@@ -137,16 +197,16 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
         raise HTTPException(status_code=400, detail="malformed event") from err
     handler = HANDLERS.get(event["type"])
     if handler is None:
-        log.info("webhook ignored: event=%s type=%s is not handled", event["id"], event["type"])
+        log.info("webhook ignored: event=%r type=%r is not handled", event["id"], event["type"])
         return "ignored"
     inserted = conn.execute(
         "INSERT INTO stripe_events (event_id, type) VALUES (%s, %s) ON CONFLICT (event_id) DO NOTHING RETURNING event_id",
         (event["id"], event["type"])).fetchone()
     if inserted is None:
-        log.info("webhook duplicate: event=%s type=%s", event["id"], event["type"])
+        log.info("webhook duplicate: event=%r type=%r", event["id"], event["type"])
         return "duplicate"
     outcome, tenant_id = handler(conn, event, created)
-    log.info("webhook %s: event=%s type=%s tenant=%s", outcome, event["id"], event["type"], tenant_id)
+    log.info("webhook %s: event=%r type=%r tenant=%r", outcome, event["id"], event["type"], tenant_id)
     return outcome
 
 
