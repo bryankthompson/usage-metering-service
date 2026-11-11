@@ -75,6 +75,9 @@ These were attacked and held; the test stays because the failure would be silent
 - A live burst and a real Postgres restart: only `scripts/flood.py` and `scripts/outage-check.sh`, by hand. Restart policy
   was checked by hand: stopping postgres inside the db container restarts it (3 to 4 s to healthy in seven runs); `docker stop`
   and `docker kill` count as manual stops and are not restarted (both left the container exited after 12 and 15 s).
+- Data kept across `docker compose down` and `up` (the named volume `pgdata`): checked by hand, not in `scripts/test`. After
+  `down` without `-v` and after `up -d --force-recreate db`, a seeded price, entitlement and events were still there; `down -v`
+  gave an empty database with the tables recreated from `db/*.sql`.
 - Multi-process concurrency: the race tests use threads in one process. Two rollup processes at once were not run.
 - Stripe: signatures are made locally with a fake secret; no call to Stripe, no real platform call, test mode only.
 - Body size on `/v1/usage` for an admitted tenant (the webhook route has a cap) and load beyond the flood's 600 requests.
@@ -88,4 +91,4 @@ These were attacked and held; the test stays because the failure would be silent
 | No real authentication; the first of repeated `X-Tenant-Id` headers wins | README Not built; `app/edge.py` docstring |
 | A webhook can store a tenant id the edge never admits (leading space or tab, control characters), and nothing binds a tenant to one customer id | here only (one customer per tenant: `docs/billing.md`) |
 | A far-future Stripe `created` could pin `last_event_at` and make real events `stale` (by reading, not tested) | here only |
-| An interrupted first `up` leaves a half-built data volume | `docs/demo.md` |
+| An interrupted first `up` leaves a half-built data volume, which `down` now keeps too (`down -v` removes it) | `docs/demo.md` |

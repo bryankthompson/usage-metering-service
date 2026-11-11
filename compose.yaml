@@ -8,6 +8,8 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
+      # A named volume, so `docker compose down` (without -v) and a recreated container keep the data.
+      - pgdata:/var/lib/postgresql/data
       # Postgres runs db/*.sql in filename order the first time the data volume is created.
       - ./db:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -40,3 +42,6 @@ services:
         condition: service_healthy
     command: ["python", "-m", "app.rollup", "--every", "3600"]
     restart: unless-stopped
+
+volumes:
+  pgdata:
