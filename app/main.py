@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import ingest, pricing, webhooks
+from app.bodylimit import BodyLimit
 
 log = logging.getLogger("uvicorn.error")
 
@@ -32,6 +33,7 @@ def configure_logging() -> None:
 def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="usage-metering")
+    app.add_middleware(BodyLimit, limits={"/v1/usage": ingest.MAX_BODY_BYTES})
 
     @app.exception_handler(psycopg.OperationalError)
     async def database_unavailable(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
@@ -41,7 +43,7 @@ def create_app() -> FastAPI:
         Nothing the handler did is committed: a connection that fails mid-request has rolled back.
         """
         log.error("database unavailable: %s %s: %s", request.method, request.url.path, exc)
-        return JSONResponse(status_code=503, content={"detail": "database unavailable"})
+        return JSONResponse(status_code=503, content={"detail": "database unavailable"}, headers={"Retry-After": "1"})
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

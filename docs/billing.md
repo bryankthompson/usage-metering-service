@@ -47,7 +47,9 @@ No admin API: prices are added through `add_price_version`. Nothing is sent to S
 `POST /v1/stripe/webhook` checks `Stripe-Signature` on the raw body (`stripe.Webhook.construct_event`, secret
 `STRIPE_WEBHOOK_SECRET`) before it touches the database. No secret set (or a blank one): 503. A body over 1 MiB: 413
 (it is read before the signature can be checked, so it is capped). Missing or bad signature, a timestamp older than
-5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is 503 on every route, not 500. The tenant is `subscription.metadata.tenant_id` (the row is
+5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is 503 on every route, not 500, with
+`Retry-After: 1`. So is a wait of more than 2 seconds (`db.LOCK_WAIT`) for a held lock, such as the tenant's advisory lock or
+its entitlement row: the event is not recorded and Stripe's retry applies it. The rollup (closing) side never times out. The tenant is `subscription.metadata.tenant_id` (the row is
 created or updated) or, for invoices, the `entitlements` row with that `stripe_customer_id`. No tenant found: 200
 `{"status": "ignored"}`, logged, not recorded. Other event types are ignored the same way, and so is a subscription
 whose `tenant_id` is not usable text: over 200 characters (the limit `/v1/usage` has), a control character or a lone
