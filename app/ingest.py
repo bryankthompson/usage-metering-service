@@ -22,6 +22,8 @@ from app.rollup import lock_hour_shared
 # is logged with %r: a newline in it must not start a fake log line.
 log = logging.getLogger("uvicorn.error")
 
+MAX_BODY_BYTES = 64 * 1024      # an event is a few hundred bytes; app/bodylimit.py refuses more with 413 before parsing it
+
 
 class QuietValidationRoute(APIRoute):
     """A 422 that does not echo the offending input. FastAPI echoes it, and a NaN, an Infinity or a lone
