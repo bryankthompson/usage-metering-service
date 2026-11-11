@@ -120,6 +120,13 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
+    if (row and row["last_event_at"] == created and row["status"] == "canceled"
+            and event["type"] != "customer.subscription.deleted"):
+        # Stripe's `created` has one-second resolution and delivery order is not guaranteed, so a late `updated(active)` can
+        # carry the cancel's own second. Ties apply in arrival order except this one: a tie never undoes a cancel.
+        log.warning("webhook tie after cancel: event=%r type=%r tenant=%r shares the second of the cancel and is stale",
+                    event["id"], event["type"], tenant_id)
+        return "stale", tenant_id
     # A deleted subscription is canceled whatever status its payload carries (fail closed).
     raw_status = sub.get("status")
     status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(

@@ -9,6 +9,11 @@ Money is an integer count of micro-USD (1 USD = 1,000,000). No float and no true
   trigger rejects UPDATE and DELETE.
 - `price_at(model, at)` returns the version with the greatest `effective_from <= at` (a tie goes to the later
   version). No version in force raises `NoPrice`; a missing price is never rated as zero.
+- Charges rate a whole hour at the price in force at the START of that hour, so a version applies from the first
+  hour that starts at or after its `effective_from`. A version effective at 10:30 first applies to the 11:00 hour;
+  usage from 10:30 to 11:00 is rated at the earlier price. Use an hour boundary for `effective_from` if you mean one.
+- Prices are only added, never changed, but a bill is not stored (see Charges): a version added later with an
+  earlier `effective_from` changes what charges returns for the hours after it.
 
 ## Rating
 `rate` = `(tokens_in * input_price + tokens_out * output_price)` divided by 1,000 in integer arithmetic, rounded
@@ -17,8 +22,15 @@ half up ONCE on that sum. Example: 1 token at 1,500 micros per 1k is 1.5, which 
 ## Charges
 `GET /v1/tenants/{tenant_id}/charges?start=...&end=...` (ISO 8601 text with a time zone, such as
 `2026-11-01T00:00:00Z`; a bare number is not read as Unix seconds) rates the tenant's
-`usage_rollups_hourly` rows with `start <= hour_start < end`. Each row is rated at its own `hour_start`, so a price
-change mid-period applies from its effective time. Each row is rounded on its own; `total_micros` is the sum of lines.
+`usage_rollups_hourly` rows with `start <= hour_start < end`. Each row is rated at the price in force at its own
+`hour_start`, so a price change applies from the first hour that starts at or after its `effective_from` (a version
+effective at 10:30 applies from the 11:00 hour). Each row is rounded on its own; `total_micros` is the sum of lines.
+Charges are computed when asked and no bill is stored: that is a choice (no snapshot), so the same range asked again
+after a back-dated `add_price_version` can return a different total. Keep your own invoices.
+Charges cover closed hours only. Usage in an hour that has not been rolled up yet (the current hour, and an ended hour for up
+to about 65 minutes: the 5-minute grace plus one run of the hourly rollup loop) is not in `total_micros`, and the response
+does not say so.
+Model names are compared byte for byte: `GPT`, `gpt` and `GPT ` are three models, each needing its own price.
 Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes, a number instead of ISO text,
 or `start >= end`,
 409 if a row has no price in force (the response names the model). The route sits behind `require_entitlement`, so
@@ -50,14 +62,23 @@ reached, so a cancel for it is not lost.
 | `customer.subscription.created/updated/deleted` | `plan` = Stripe price id. `active`/`trialing` -> `active`, clears the failure and grace. `past_due` -> `past_due`, keeps an existing grace window. Any other status -> `canceled`. `deleted` is always `canceled`, whatever status its payload carries. A cancel clears the failure and the grace window, so a later `past_due` event starts with none. |
 | `invoice.payment_failed` | `past_due`, `payment_failed_at` = event `created`, `grace_until` = that + `GRACE_PERIOD_HOURS` (default 72). A `canceled` tenant stays canceled. |
 
-Grace runs from the first failure of a delinquency. Stripe retries a failed invoice for days, so a later
+Grace runs from the first failure of a delinquency THAT ARRIVES. Stripe retries a failed invoice for days, so a later
 `invoice.payment_failed` for a tenant that is already `past_due` with a window keeps `payment_failed_at` and
-`grace_until` and only records `last_event_at`. An `active` subscription event clears the window; the next failure
-starts a new one. `invoice.paid` is not handled: only `customer.subscription.*` events restore `active`.
+`grace_until` and only records `last_event_at`. That first-arrived failure is Stripe's first failure only when delivery
+order equals creation order; if a retry is delivered first, the window counts from the retry and the older failure that
+arrives afterwards does not move it (a difference of seconds to minutes with Stripe's retry spacing). An `active`
+subscription event clears the window; the next failure starts a new one. `invoice.paid` is not handled: only `customer.subscription.*` events restore `active`.
 
 Each event id is recorded in `stripe_events` in the same transaction as the change; a redelivery is 200 `duplicate`.
-An event older than `last_event_at` does not overwrite newer state (200 `stale`); equal timestamps apply in arrival
-order. One exception: an older failure for a `past_due` tenant that has no window opens one, counted from that
+An event older than `last_event_at` does not overwrite newer state (200 `stale`). Events with the same `created` second
+apply in arrival order (Stripe's `created` has one-second resolution and gives no order inside a second), with one rule:
+**a tie never undoes a cancel.** A `customer.subscription.created/updated` whose `created` equals the `last_event_at` of
+a `canceled` tenant is `stale` and logged (`webhook tie after cancel`), so a late `updated(active)` of the cancel's own
+second cannot reactivate the tenant; only a strictly newer subscription event does. A `deleted` of that second still
+applies, and so does a tie in any other state. An `invoice.payment_failed` of the cancel's second does not reopen the
+tenant either (a failure never does). Cost: a genuinely new subscription created in the same second as the old one's cancel
+(a plan swap done as delete plus create) stays denied until a strictly newer subscription event arrives: it fails closed.
+One exception to `stale`: an older failure for a `past_due` tenant that has no window opens one, counted from that
 failure's own time (200 `processed`, `last_event_at` unchanged). It can be shorter than a fresh window if the old
 failure belongs to an earlier, cured delinquency, and with failures delivered out of order by more than the retry
 spacing it can be later than Stripe's first failure. A later older failure does not move an existing window.
