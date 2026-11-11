@@ -98,7 +98,7 @@ These were attacked and held; the test stays because the failure would be silent
 | Known limit (found, not fixed) | Where it is written down |
 |--|--|
 | The rollup sum is BIGINT: past 9.2e18 tokens one hour fails loudly and blocks later hours | `docs/ingest.md` Known limit; README Not built |
-| The append-only trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger) | `docs/ingest.md` (first paragraph); README section 2 |
+| The append-only trigger does not stop TRUNCATE, or the table owner or a superuser, who can disable the trigger | `docs/ingest.md` (first paragraph); README section 2 |
 | An hour with events closes for every tenant once it is 5 minutes old, so one tenant's event in an old quiet hour makes other tenants' later events for it late (stored, never billed) | here only (late events: `docs/ingest.md`) |
 | No real authentication; the first of repeated `X-Tenant-Id` headers wins | README Not built; `app/edge.py` docstring |
 | A webhook can store a tenant id the edge never admits (leading space or tab, control characters), and nothing binds a tenant to one customer id | here only (one customer per tenant: `docs/billing.md`) |
