@@ -241,3 +241,16 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   4 overclaims); both lists were applied. A fifth review lane then checked every sentence of the README and docs from a clean
   clone: 0 major and 9 minor findings (stale citations, an old count, wording that differed between pages, a process
   claim), all fixed or recorded here.
+- **20:23** The claims lane's re-check of the runbook, testing guide and demo page against the merged head found 0 major and 0
+  minor findings and 1 note (a prerequisite sentence in the demo page, fixed). Its first report was applied in three small docs
+  branches: the citations in the code tour and design notes (#32: a script now checks that each cited line holds the code
+  its sentence is about, and it found 8 more wrong ranges than the lens had listed), the build log and the README's process
+  wording (#31), and one wording for what the append-only triggers do not stop (#33: TRUNCATE, or the table owner or a
+  superuser, who can disable the trigger; run on a scratch database for both tables).
+- **20:25** Dev A ran the whole suite under a New York database session zone to recount the limit written at 18:00 and found
+  that 13 of the 26 failures were not test assumptions: reconcile named the hour of a drift line in the zone's clock with a
+  literal `Z` (5 hours off), charges and the delinquent report printed the zone's offset instead of `Z`, and a year-one
+  timestamp was a 500. Billing was right in every zone. The lead chose to remove the cause and not to document it: `db.connect`
+  now sets the session zone to UTC in the statement that sets the statement timeout (#34). The ten new tests failed on the old
+  code for the stated reasons, the whole suite passes unchanged under both zones, and the old limit paragraph in
+  `docs/billing.md` was rewritten.
