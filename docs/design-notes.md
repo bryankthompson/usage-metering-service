@@ -11,7 +11,7 @@ The rule: write the fact down first, derive everything else from it, and when un
 - **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:30-37`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
 - **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
-  `add_price_version`, `app/pricing.py:55-56`). Money is integer micro-USD (`docs/billing.md`).
+  the INSERT inside `add_price_version`, `app/pricing.py:55-56`; the function starts at :44). Money is integer micro-USD (`docs/billing.md`).
 - **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`require_entitlement`, `app/edge.py:52-64`).
 
 ## 2. Where things would attach (NOT BUILT)

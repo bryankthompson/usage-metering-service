@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BeforeValidator
 from pydantic_core import PydanticCustomError
 
-from app.db import get_conn
+from app import db
 from app.edge import require_entitlement
 
 log = logging.getLogger(__name__)
@@ -121,7 +121,8 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
     """Rate every hourly rollup row of the tenant with `start <= hour_start < end`, each at its own hour_start.
 
     Returns (lines, total_micros). Each line is rounded on its own (see `rate`) and the total is the
-    sum of the lines. A price change inside the period therefore applies from its effective time.
+    sum of the lines. A whole hour is rated at the price in force at its start, so a version applies from the first
+    hour that starts at or after its `effective_from`; usage inside an hour is never split between two prices.
     Raises NoPrice if any row has no price in force at its hour.
     """
     _require_aware(start, "start")
@@ -202,8 +203,7 @@ IsoDatetime = Annotated[datetime, BeforeValidator(_iso_text)]
 
 @router.get("/v1/tenants/{tenant_id}/charges")
 def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime,
-                caller: str = Depends(require_entitlement),
-                conn: psycopg.Connection = Depends(get_conn)) -> dict:
+                caller: str = Depends(require_entitlement)) -> dict:
     if caller != tenant_id:
         raise HTTPException(status_code=403, detail="tenant does not match the caller")
     for name, value in (("start", start), ("end", end)):
@@ -213,13 +213,16 @@ def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime,
         raise HTTPException(status_code=422, detail="start must be before end")
     if end - start > MAX_RANGE:
         raise HTTPException(status_code=422, detail=f"the range is wider than {MAX_RANGE.days} days: ask for the period in pieces")
-    # Read before the rows: an hour that closes in between is then listed AND billed (the safe direction), never neither.
-    unclosed = unclosed_hours(conn, tenant_id, start, end)
-    try:
-        lines, total = charge_lines(conn, tenant_id, start, end)
-    except NoPrice as err:
-        log.error("charges refused: %s", err)
-        raise HTTPException(status_code=409, detail=str(err)) from err
+    # Opened here, not in a dependency (as in `ingest_usage`): a dependency's connection stays open while the request waits
+    # for a free worker thread, and a refused request above never needs one. A database error reaches the handler in main.py.
+    with db.connect() as conn:
+        # Read before the rows: an hour that closes in between is then listed AND billed (the safe direction), never neither.
+        unclosed = unclosed_hours(conn, tenant_id, start, end)
+        try:
+            lines, total = charge_lines(conn, tenant_id, start, end)
+        except NoPrice as err:
+            log.error("charges refused: %s", err)
+            raise HTTPException(status_code=409, detail=str(err)) from err
     if unclosed:
         log.info("charges partial: tenant=%r %d hour(s) with usage are not closed yet, first %s", tenant_id, len(unclosed),
                  unclosed[0].isoformat())
