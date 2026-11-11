@@ -156,6 +156,8 @@ review desk and a merge gate): one lead, two assistant devs, a standing advisor 
 a review desk (DRC) and short-lived lanes for single jobs. [docs/build-log.md](docs/build-log.md) is the timestamped
 record; this is the short version.
 
+[docs/how-it-was-built.md](docs/how-it-was-built.md) explains how AI-written code was checked: the loop for each change, the review rounds with their counts, what went wrong and the limits of the method.
+
 **Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI), one brief per
 dev, and was the only session allowed to merge. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
 built the price table, the Stripe webhooks, the entitlement record, the edge check and the first README. Later work came

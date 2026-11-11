@@ -1,0 +1,146 @@
+# How it was built, and how the AI-written code was checked
+
+Almost all of this code was written by AI coding sessions. This page says how the work was organised and what was done to
+find out whether it is right. It states what each check found and what it did not. Times are from `docs/build-log.md`
+(US Central, 2026-11-10); pull request numbers are from `git log --first-parent --merges`. Counts of review findings come
+from review reports that are kept outside this repo, so this page restates them (section 7).
+
+## 1. The setup
+
+The operator (the person running the sessions) opened them and answered scope questions. One session, the
+lead, wrote the scaffold (schema split by owner, stub routers, a deny-all edge, CI), wrote a brief for each job and was
+the only session that merged. Two devs (dev A: intake, rollups, end-to-end; dev B: prices, webhooks, entitlements, edge)
+each worked in their own clone and never merged. A standing advisor session gave the lead second opinions. An
+independent review desk (DRC) read each change as a separate read-only job. Later work ran as short-lived lanes, one
+job each, and four read-only red-team lanes. Every lane had its own session and its own branch and worktree. Each had a
+brief on paper that fixed which files it could touch (build log 17:30). Messages between sessions were treated as data
+to check, not as orders.
+
+## 2. The loop for every change
+
+1. Brief: what the lane builds, which files it may touch, what it must hand back.
+2. Branch: `dev/<name>` locally, pushed as `lane/<name>`.
+3. Test first, watched failing: the new test is run against the old code and must fail for the stated reason.
+4. Mutation check: break the new rule by one line and see the guarding test turn red, then revert.
+5. The full suite (`scripts/test`, a real database, one per checkout) on the code as it will merge.
+6. DRC review of that exact head. The tier is `auto`, or `high` for guards, the entitlement path and large diffs
+   (build log 15:49, 17:35, 17:40).
+7. The CI check `test` is green.
+8. The merge gate. The merge command refuses without a review receipt for the branch, a head that contains the latest
+   `main` and green CI. Commits added after the review, and any finding left owed, need the lead's written note.
+9. One pull request per change. At the head this page was written from, `git log --first-parent --merges` lists 36 merged
+   pull requests (#1 to #36).
+
+The repo does not store the receipts. The build log has no entries for #24 to #29, so for those the gate rests on the
+rule above, not on a record you can open here.
+
+## 3. How AI-written code was checked: independent layers
+
+Each layer fails in a different way from the others. One example each.
+
+- **Tests that fail on the old code.** Dev A wrote the tests for the lost-cancel fix (#27) first: 2 of 6 failed on the
+  previous code. The ten tests added with the UTC session pin (#34) failed on the old code for the stated reasons.
+- **Mutation checks.** Before the first handoffs (15:26) dev A broke the race test's rule and dev B the half-up rounding
+  rule, and each saw the test go red. The fix for #27 came with three more.
+- **A reviewer that did not write the code.** DRC found that the hourly token sum can overflow a BIGINT column after
+  about 9 million maximum-size events in one hour (15:39). It was accepted as a documented limit.
+- **A fold with no test.** DRC's finding on #21 was a body-cap bypass behind a path prefix. DRC folded a fix, but the
+  fold had no test, so the lead added a test that fails when the fold is reverted (19:01).
+- **An advisor reading what the tests cannot see.** The advisor noticed a daylight-saving fix had no test that could
+  fail, because the default test session runs in UTC (18:00). The lead added a New York session test and removed the fix
+  once to watch it fail. A full run under that zone later showed real effects, and #34 pinned every connection to UTC.
+- **Forced failures to prove a hang fix.** For #8 the advisor read the diff and ran two forced failures instead of a third
+  review: a barrier waiting for a fifth party ended in 31 s with `BrokenBarrierError`, and a blocked wait that never
+  matches ended in 6 s. Both edits were reverted before the merge (17:38).
+- **A dev reading the other dev's code.** Dev A found that every repeated payment-failure event pushed the grace window
+  forward. The DRC review of that slice, at high effort with seven findings, had not flagged it (16:01).
+- **Read-only red-team lanes.** Four lenses (money, concurrency, security, operations) attacked the merged code. A finding
+  counted only with a command or a failing test, and every one came with a repro (18:20).
+- **A lane that checked the words against the code.** A fifth lens read every sentence of the README and docs from a clean
+  clone: 0 major and 9 minor findings (stale citations, an old count, a process claim). A script, run by hand and not
+  kept in the repo, then checked every citation (#32).
+- **A clean-clone run of the final SHA.** Dev A ran the shipped path from a clean clone (start, demo, outage check, data
+  kept across `down` and `up`, 588 tests; 19:58 to 20:12). Dev B ran the suite from a clean clone at `e603a15`: 601 passed, also with
+  `PGTZ=America/New_York`, and checked 40 citations and every link.
+- **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
+  was checked by a person reading the diff.
+
+## 4. The review rounds
+
+| Round | Lenses | Blocker | Major | Minor |
+|--|--|--|--|--|
+| Round 1 (on the first merged code) | money, concurrency, security, operations | 0 | 9 | 10 |
+| Round 2 (re-run repros, attack the fixes) | the same four | 0 | 3 | 7 |
+| Round 3 (the new delete rule) | concurrency | 0 | 0 | 2 |
+| Claims, first pass (words against code) | claims | not counted | 0 | 9 |
+| Claims, re-check of the runbook, testing and demo pages | claims | not counted | 0 | 0 |
+| Claims, final check at `e603a15` | claims | not counted | 0 | 1 |
+
+The reports also list notes, not counted here. The claims reports count major and minor only.
+
+Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was found by two lenses.
+
+| Round 1 major | Result and why |
+|--|--|
+| A price change inside an hour billed at the old price | Documented: charges rate a whole hour at the price in force at its start, so a version applies from the first hour that starts at or after it. |
+| A back-dated price version rewrites a bill already shown | Documented. No bill is stored, so a back-dated version changes later answers. Refusing it was not chosen (section 6). |
+| One unpriced model fails a whole range with 409 | Message now names every missing model; still all-or-nothing, which round 2 confirmed. |
+| A same-second event undoes a cancel (two lenses) | Fixed: a tie is stale (#16). Round 2 re-ran it and it held. |
+| A 600 MB body is read before the 401 | Fixed: a 64 KiB cap on `/v1/usage`, 1 MiB on the webhook (#21). Round 2: 413 in about 1 ms. |
+| Ingest waits without a timeout for an hour lock; 40 waiters freeze `/healthz` | Fixed: a 2 s lock wait gives 503 with `Retry-After` (#21). `/healthz` became `async def` (#28). |
+| A paused database hangs every request | Fixed before the connection (503 at 5 s, #17). A freeze after connecting is round 2's. |
+| One poisoned rollup hour blocks later hours; charges answers 200 with total 0 | Fixed: each hour closes on its own (#17) and charges lists `unclosed_hours`. |
+
+| Round 2 major | Result and why |
+|--|--|
+| A cancel older than an applied payment failure was stale and lost | Written down as a limit first, then fixed (#27) after the advisor said a stale cancel is recorded as handled and never retried. |
+| The database lived in an anonymous volume, so recreating the container lost it | Fixed: a named volume (#25). |
+| A database frozen after the connection still hangs the API | Documented limit (section 6). |
+
+## 5. What went wrong, and was written down
+
+- **A force-push over a merge commit (17:45).** A fetch had refreshed the `--force-with-lease` that dev A used, so a push
+  overwrote the lead's merge of `main`. The code was the same, but DRC was already reading the old head, so the job was
+  sent again.
+- **A mistyped base hash.** The lead mistyped the base of a review job at 15:30 and 17:45, and named a base the lane did
+  not contain at 18:50. The first was corrected before the desk reached the code, the second within a minute (DRC's reply said the base did not resolve), and DRC refused the third at intake.
+- **Throwaway databases on live volumes (19:29).** While checking that an old volume survived, dev B started databases on
+  five volumes that held a data directory, three of them live. Afterwards the reads found no errors and the tables intact.
+  The rule since: touch only volumes your own compose project created.
+- **A wrong hour found only by recounting under another zone.** At 18:00 a New York run failed 16 of 507 tests, judged
+  mostly test assumptions. Recounted at 20:25, 13 of 26 failures were real: a drift line named the hour in the zone's
+  clock with a literal `Z` (5 hours off), two reports printed an offset instead of `Z`, and a year-one timestamp was a 500.
+  Billing was right in every zone. The cause was removed (#34), not documented.
+- **A limit that the advisor said was wrong.** A cancel older than an applied payment failure was first documented as an
+  accepted limit. At 19:40 the advisor said to fix it, and #27 did, with tests first.
+- **A fix the reviewer then flagged (16:05).** DRC folded a fix into the entitlements lane and flagged it as opening a
+  fail-open case. The lead reverted it and wrote down the one-subscription-per-tenant assumption.
+- **A keepalive idea disproved by measurement (19:40).** TCP keepalive and `tcp_user_timeout` were proposed for a frozen
+  database. Dev B measured that they do not end the wait, because a paused container keeps answering probes.
+
+## 6. Decisions not taken, with the reason
+
+- **Refusing back-dated price versions.** A correction is a legitimate use, so it is documented. Round 2 confirmed the
+  code has no floor; a bill is rebuilt, not stored.
+- **Refusing the public placeholder webhook secret.** It is fake on purpose and the README says so. The security lens
+  still lists it as open.
+- **A `Retry-After` on the edge 503.** The 503 `entitlement check unavailable` has none; the 503 for a lock wait has
+  `Retry-After: 1` because there a resend is safe. The edge answer means the API cannot read the database, which someone
+  has to fix (`docs/runbook.md`, step 11).
+- **Leaving the frozen-database hang as a documented limit.** The proposed keepalive options were measured and did not
+  help. Recovery is to unpause the database or restart the API (`docs/ingest.md`).
+- **A third DRC review of #8.** The advisor read the diff and ran two forced failures instead (section 3).
+- **A fix for the half-built data volume after an interrupted first start.** The failure is loud and `down -v` recovers it
+  (16:27). An automatic schema step would have meant designing migrations.
+
+## 7. Limits of this method
+
+- The reviewers are models too: DRC, the advisor and the red-team lanes. They found real defects and also missed some. The
+  high-effort review of the entitlements slice missed the grace-window slide that dev A found by reading.
+- The platform adapter has not run against the real service. No key existed, so no call was made. It was tested
+  against fixtures and a stand-in server only.
+- There is no load test beyond `scripts/flood.py` (600 requests from 150 clients), and a few one-off red-team measurements.
+- The review counts above live in reports kept outside the repo. The build log restates some, and its test counts are
+  from handoffs, not from the repo.
+- The merge gate's receipts are not stored in the repo (section 2).
+- No person is recorded as having read the whole diff.
