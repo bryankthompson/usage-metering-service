@@ -27,7 +27,10 @@ Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars 
   `closed_hours` (`date_trunc('hour', occurred_at, 'UTC')`, so the session time zone cannot move
   the hour). A late event is answered 201 with `"late": true` (a resend says so too, as does the log
   line), is stored, and is never in a rollup, so it is **not billed**. Ingest first takes a shared lock
-  for the event's hour (see Rollups).
+  for the event's hour (see Rollups). **How long a client has:** an event is on time until its hour is closed. With the
+  hourly loop the close runs between 5 minutes (the grace) and about 65 minutes (grace plus one loop of 3600 s) after
+  the hour ends, so a client that buffers through an outage and resends later than that gets `201` with `"late": true`
+  and is never billed for that event.
 
 **Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py tests/test_attack_ingest.py` (`DATABASE_URL` if not port 5432). The second file is the hostile-input, race and outage tests.
 

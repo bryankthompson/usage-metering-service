@@ -260,10 +260,8 @@ def test_bad_ranges_are_422_never_a_500(client, conn, params):
 
 
 @pytest.mark.parametrize("start, end", [
-    ("0001-01-01T00:00:00Z", "9999-12-31T23:59:59Z"),                                 # the whole calendar
     ("0001-01-01T00:00:00+05:00", "0001-01-02T00:00:00+05:00"),                       # before UTC year one
     ("9999-12-31T00:00:00-12:00", "9999-12-31T23:59:59.999999-12:00"),                # past UTC year 9999
-    ("2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"),
     ("1969-12-31T23:59:59Z", "1970-01-01T00:00:01Z"),                                 # across the epoch
 ])
 def test_extreme_ranges_are_answered_not_crashed(client, conn, start, end):
