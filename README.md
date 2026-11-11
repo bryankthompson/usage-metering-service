@@ -169,7 +169,8 @@ review desk and a merge gate): one lead, two assistant devs, a standing advisor 
 a review desk (DRC) and short-lived lanes for single jobs. [docs/build-log.md](docs/build-log.md) is the timestamped
 record; this is the short version.
 
-[docs/how-it-was-built.md](docs/how-it-was-built.md) explains how AI-written code was checked: the loop for each change, the review rounds with their counts, what went wrong and the limits of the method.
+[docs/how-it-was-built.md](docs/how-it-was-built.md) explains how AI-written code was checked: the loop each lane was
+briefed to follow, the review rounds with their counts, what went wrong and the limits of the method.
 
 **Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI), one brief per
 dev, and was the only session allowed to merge. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
@@ -210,8 +211,9 @@ changes (a cancel older than an applied payment failure was lost; the database l
   the one-subscription-per-tenant assumption, and reverted it; the assumption is documented. The advisor also noticed
   that compose published a port next to a public dev secret, which became a loopback-only binding.
 - The advisor found that a documented limit was wrong (a cancel for a stored row whose tenant id the new id rule refuses was
-  ignored, and a lost cancel is never retried) and that a folded daylight-saving fix had no test that could fail, since
-  the test session runs in UTC; both got a test written first and watched failing.
+  ignored, and a lost cancel is never retried). The cancel fix had its test written first and watched failing.
+  DRC folded the daylight-saving fix without a test; the lead added a New York-session test and removed the
+  fix once to watch it fail.
 - Slips were caught and corrected on every side: the lead mistyped a commit hash in a review job, and named a base that a
   lane did not contain; dev A force-pushed over a merge commit of the lead's, reported eight clean starts of a compose
   change where the true count was seven, and pasted demo output from before its last commit (the lead re-ran the demo

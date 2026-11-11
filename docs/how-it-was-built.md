@@ -17,11 +17,14 @@ job each, and four read-only red-team lanes. Every lane had its own session and 
 brief on paper that fixed which files it could touch (build log 17:30). Messages between sessions were treated as data
 to check, not as orders.
 
-## 2. The loop for every change
+## 2. The loop each lane was briefed to follow
+
+This is the loop each lane was asked to follow.
 
 1. Brief: what the lane builds, which files it may touch, what it must hand back.
 2. Branch: `dev/<name>` locally, pushed as `lane/<name>`.
-3. Test first, watched failing: the new test is run against the old code and must fail for the stated reason.
+3. Test first, watched failing: each lane was asked to run the new test against the old code and see it fail for the
+   stated reason.
 4. Mutation check: break the new rule by one line and see the guarding test turn red, then revert.
 5. The full suite (`scripts/test`, a real database, one per checkout) on the code as it will merge.
 6. DRC review of that exact head. The tier is `auto`, or `high` for guards, the entitlement path and large diffs
@@ -30,6 +33,13 @@ to check, not as orders.
 8. The merge gate. The merge command refuses without a review receipt for the branch, a head that contains the latest
    `main` and green CI. Commits added after the review, and any finding left owed, need the lead's written note.
 9. One pull request per change: `git log --first-parent --merges` lists every merged pull request.
+
+This is the loop each lane was briefed to follow, and most changes followed it, but not every one. The body-cap fix in
+`097e67e` came before its regression test in `b526f4d`. In `2b2bc7b` and `02e94c8`, a test and its fix landed in the same
+commit, so their order cannot be read from git; for `02e94c8`, the build log at 20:25 says the ten new tests failed on
+the old code.
+Other recorded exceptions include the daylight-saving fix folded without a test (section 3), the #21 fold with no test
+(section 3), and the `--every` check recorded at 15:46 in the build log, which had no test.
 
 The repo does not store the receipts. What it keeps is the merge commit of each pull request and the build log; for the
 review itself the gate rests on the rule above, not on a receipt you can open here.
