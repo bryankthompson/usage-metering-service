@@ -126,3 +126,12 @@ def test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight(conn, mo
                 assert closing.result(timeout=5) == (0, 0)
     finally:
         closer.close()
+
+
+def test_the_limit_ends_with_the_transaction(conn, monkeypatch):
+    # A connection reused after a request (or by the rollup) must not keep a lock timeout it was never meant to have.
+    monkeypatch.setattr(db, "LOCK_WAIT", "300ms", raising=False)
+    db.limit_lock_wait(conn)
+    assert conn.execute("SHOW lock_timeout").fetchone()["lock_timeout"] == "300ms"
+    conn.commit()
+    assert conn.execute("SHOW lock_timeout").fetchone()["lock_timeout"] == "0"
