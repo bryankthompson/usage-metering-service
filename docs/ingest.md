@@ -68,4 +68,7 @@ The one-shot run prints `rollup: closed N hours, failed M: <hours>` and exits 1;
 Find it with `docker compose logs rollup | grep "rollup failed"`. Hours may close out of order; that never makes an event late.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
-so a database that stops answering is a 503 and `/healthz` keeps answering.
+so a database that stops accepting connections, or answers slowly, is a 503 and `/healthz` keeps answering.
+Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the
+statement timeout is enforced by the server and the client has no timer of its own; the settings query right after
+connecting is likewise not bounded (found by review, not fixed).
