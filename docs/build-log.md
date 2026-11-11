@@ -279,5 +279,5 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   from a clean clone of `dea36c8`, the 610 tests, the demo and the outage check, and all passed. The first demo call came
   before the API was listening ([the demo guide](demo.md) says to give it a few seconds); the rerun passed.
   This is the run of the final code; the `e603a15` runs came before #38.
-  The platform adapter has never run against the live service: there was no API key, so it runs on recorded responses.
+  The platform adapter has never run against the live service: there was no API key, so it runs on hand-written fixtures.
   No person has read the diff, and the operator's read of the money and entitlement code has not happened.
