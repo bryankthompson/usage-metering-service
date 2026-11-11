@@ -133,6 +133,20 @@ def open_hours() -> datetime:
     return datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
 
 
+def closed_message(hour: datetime, during_rollup: bool, output: str = "") -> str:
+    """Why a scenario hour is closed. The compose rollup worker (--every 3600) can close it before our own rollup runs."""
+    if during_rollup:
+        return (f"{hour.isoformat()} is closed, but not by this script's rollup: the rollup worker closed it first, so the "
+                f"expected charges (which assume our events landed before the close) cannot hold. Re-run.\n{output}")
+    return f"{hour.isoformat()} is already closed: someone else (the rollup worker) closed it. Re-run to pick the next open hours."
+
+
+def closed_among(hours: list[datetime]) -> list[datetime]:
+    listed = ", ".join(f"'{h.isoformat()}'" for h in hours)
+    found = psql(f"SELECT to_char(hour_start AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') FROM closed_hours WHERE hour_start IN ({listed})")
+    return [datetime.fromisoformat(t).replace(tzinfo=timezone.utc) for t in found.split()]
+
+
 # ---- the scenario ----
 
 def paint(text: str, code: str) -> str:
@@ -154,6 +168,8 @@ def play(args) -> int:
     first = open_hours()
     hours = [first, first + timedelta(hours=1)]
     tenants = {role: f"scn-{n}-{role}" for role in ("active", "past-due", "canceled")}
+    for hour in closed_among(hours):
+        raise Fail(closed_message(hour, during_rollup=False))
     step(f"hours {hours[0].isoformat()} and {hours[1].isoformat()}; tenants {', '.join(tenants.values())}")
 
     # This run's own model labels, so a price from an earlier run is never in force for these hours.
@@ -225,6 +241,8 @@ def play(args) -> int:
     print(out, end="")
     for hour in hours:
         if f"closed hour={hour.isoformat()} rows=" not in out:
+            if hour in closed_among([hour]):
+                raise Fail(closed_message(hour, during_rollup=True, output=out))
             raise Fail(f"the rollup did not close {hour.isoformat()}:\n{out}")
     step("rollup closed both hours")
 

@@ -77,5 +77,7 @@ brought the column back). `docker compose down -v` deletes the demo data and sta
 
 ## What it does not do
 
+The compose rollup worker runs hourly: if it closes the scenario's hours mid-run, the scenario fails loudly (the expected charges assume its own events landed before the close) and a re-run picks fresh hours.
+
 Test mode only, with the fake secret from `compose.yaml`. `X-Tenant-Id` is a stand-in for authentication.
 Nothing is sent to Stripe.

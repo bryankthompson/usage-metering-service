@@ -74,6 +74,13 @@ def test_total_is_the_sum_of_the_rows():
     assert scenario.expected_total(lines) == 4
 
 
+def test_closed_hour_messages_say_who_closed_it_and_to_re_run():
+    before = scenario.closed_message(H, during_rollup=False)
+    assert "already closed" in before and "Re-run" in before
+    during = scenario.closed_message(H, during_rollup=True, output="x")
+    assert "rollup worker closed it first" in during and "Re-run" in during and during.endswith("x")
+
+
 # ---- the stand-in server ----
 
 def serve(seed):
