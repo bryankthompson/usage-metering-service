@@ -254,3 +254,12 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   now sets the session zone to UTC in the statement that sets the statement timeout (#34). The ten new tests failed on the old
   code for the stated reasons, the whole suite passes unchanged under both zones, and the old limit paragraph in
   `docs/billing.md` was rewritten.
+- **20:44 to 20:53** Final checks on the code as merged at `e603a15` (the commits after it change documentation only). Dev A
+  ran the shipped path from a clean clone: start, demo, outage check, flood, data kept across `down` and `up`, emptied by
+  `down -v`, 601 tests, and 601 again under a New York session zone. Dev B ran the same suite from its own clean clone, 40
+  citations and every link. The claims lane's final check found 0 major and 1 minor (the build log said a script checked
+  the citations while none is in the repo; reworded in #36, which also says in the runbook how a wrong price version is
+  superseded). The lead ran the suite, the demo, the outage check and the adapter replay once more on `c9ddf6b`.
+- **21:08 to 21:36** The operator said the interviewers may care how the code was built. Dev B wrote
+  [how-it-was-built.md](how-it-was-built.md), checking each count and pull request number against git and the review
+  reports; DRC checked it again and asked for this entry and the one above.
