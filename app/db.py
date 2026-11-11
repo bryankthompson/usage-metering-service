@@ -24,13 +24,18 @@ def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) 
     The default is the request path's: statements are cancelled after REQUEST_STATEMENT_TIMEOUT_MS (psycopg raises
     QueryCanceled, an OperationalError, which the API answers with 503). The rollup close, reconcile and delinquent
     pass `statement_timeout_ms=0` (no limit): a large hour legitimately takes longer.
+
+    The session time zone is pinned to UTC for every connection, whatever PGTZ, the URL or the server says: the app reads
+    datetimes back and prints their clock hour or offset (reconcile, charges, delinquent), and a zone west of UTC made
+    those name the wrong hour and made a year-one date a 500.
     """
     if statement_timeout_ms is None:
         statement_timeout_ms = REQUEST_STATEMENT_TIMEOUT_MS
     conn = psycopg.connect(url or database_url(), row_factory=dict_row, connect_timeout=CONNECT_TIMEOUT_S)
     try:
         # A session SET, not the `options` keyword: that would replace any options in the URL or PGOPTIONS.
-        conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(int(statement_timeout_ms)),))
+        conn.execute("SELECT set_config('statement_timeout', %s, false), set_config('TimeZone', 'UTC', false)",
+                     (str(int(statement_timeout_ms)),))
         conn.commit()
     except BaseException:
         conn.close()
