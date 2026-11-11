@@ -24,7 +24,8 @@ read (also with no credentials). A body the server cannot parse at all (for exam
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the
-trigger). The application never rewrites an accepted event.
+trigger). In compose the application connects as that superuser, so the trigger guards against mistakes, not against the
+service's own credentials. The application never rewrites an accepted event.
 
 **3. Hourly rollups.** `app/rollup.py` sums one UTC hour of events per tenant and model into
 `usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`

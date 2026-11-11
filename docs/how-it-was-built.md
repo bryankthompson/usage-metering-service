@@ -29,8 +29,7 @@ to check, not as orders.
 7. The CI check `test` is green.
 8. The merge gate. The merge command refuses without a review receipt for the branch, a head that contains the latest
    `main` and green CI. Commits added after the review, and any finding left owed, need the lead's written note.
-9. One pull request per change. At the head this page was written from, `git log --first-parent --merges` lists 36 merged
-   pull requests (#1 to #36).
+9. One pull request per change: `git log --first-parent --merges` lists every merged pull request.
 
 The repo does not store the receipts. What it keeps is the merge commit of each pull request and the build log; for the
 review itself the gate rests on the rule above, not on a receipt you can open here.
