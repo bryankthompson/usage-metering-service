@@ -150,10 +150,17 @@ def backfill(conn, url: str) -> tuple[int, list[datetime]]:
 def export_actuals(url: str, path: str) -> int:
     """Write ClickHouse's totals as JSON lines for `app.reconcile --actuals`. Returns the number of lines."""
     mirrored = read_mirror(url)
-    with open(path, "w") as f:
-        for (tenant, model, hour), (tokens_in, tokens_out, _events) in sorted(mirrored.items()):
-            f.write(json.dumps({"tenant_id": tenant, "model": model, "hour": hour.isoformat(),
-                                "tokens_in": tokens_in, "tokens_out": tokens_out}) + "\n")
+    tmp = path + ".tmp"  # write beside it and rename, so an interrupted export keeps the previous complete file
+    try:
+        with open(tmp, "w") as f:
+            for (tenant, model, hour), (tokens_in, tokens_out, _events) in sorted(mirrored.items()):
+                f.write(json.dumps({"tenant_id": tenant, "model": model, "hour": hour.isoformat(),
+                                    "tokens_in": tokens_in, "tokens_out": tokens_out}) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
     return len(mirrored)
 
 
@@ -178,7 +185,7 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(1)
         else:
             print(f"mirror: wrote {export_actuals(url, args.export_actuals)} rows to {args.export_actuals}", flush=True)
-    except (RuntimeError, OSError) as err:  # clickhouse unreachable or refused: say so, non-zero
+    except (RuntimeError, OSError, ValueError) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
         print(f"mirror: {err}", file=sys.stderr)
         sys.exit(1)
 

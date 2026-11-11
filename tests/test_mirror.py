@@ -57,8 +57,11 @@ class StandIn:
 def ch(monkeypatch):
     standin = StandIn()
     monkeypatch.setenv("CLICKHOUSE_URL", standin.url)
-    yield standin
-    standin.server.shutdown()
+    try:
+        yield standin
+    finally:
+        standin.server.shutdown()
+        standin.server.server_close()
 
 
 def two_rows(conn):
