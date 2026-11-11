@@ -12,8 +12,8 @@ Money is an integer count of micro-USD (1 USD = 1,000,000). No float and no true
 - Charges rate a whole hour at the price in force at the START of that hour, so a version applies from the first
   hour that starts at or after its `effective_from`. A version effective at 10:30 first applies to the 11:00 hour;
   usage from 10:30 to 11:00 is rated at the earlier price. Use an hour boundary for `effective_from` if you mean one.
-- Prices are only added, never changed, but a bill is not stored (see Charges): a version added later with an
-  earlier `effective_from` changes what charges returns for the hours after it.
+- Prices are only added, not edited (the trigger limits are above), but a bill is not stored (see Charges): a version added
+  later with an earlier `effective_from` changes what charges returns for the hours after it.
 
 ## Rating
 `rate` = `(tokens_in * input_price + tokens_out * output_price)` divided by 1,000 in integer arithmetic, rounded

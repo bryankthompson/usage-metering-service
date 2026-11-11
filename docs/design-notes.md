@@ -10,7 +10,7 @@ The rule: write the fact down first, derive everything else from it, and when un
 - **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:20-29`, function `usage_events_append_only`).
 - **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:30-37`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
-- **Prices versioned.** A stored price version cannot change; a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
+- **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
   `add_price_version`, `app/pricing.py:55-56`). Money is integer micro-USD (`docs/billing.md`).
 - **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`require_entitlement`, `app/edge.py:52-64`).
 
@@ -60,7 +60,7 @@ provider today (`README.md`, "Not built").
 | Grace counted from the first failure that arrives | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). It is Stripe's first failure only when delivery order equals creation order. |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
 | Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py:22-23,137-139`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
-| Prices as immutable versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable`, `db/002_billing.sql:14-23`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
+| Prices as append-only versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable`, `db/002_billing.sql:14-23`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
 | The edge reads the entitlement on its own connection | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement`, `app/edge.py:39-40,52-57`); a handler in `app/main.py:39-47` now also answers 503 for a database that dies after the edge check. | One extra connection per request. |
 | Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
 

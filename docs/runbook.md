@@ -121,8 +121,11 @@ there is no CLI or API for it:
     docker compose exec -T api python -c "from datetime import datetime, timezone as z; from app import db, pricing; print(pricing.add_price_version(db.connect(), 'MODEL', datetime(2026,11,10,22,tzinfo=z.utc), 1500, 3000))"
     1
 Fill in `MODEL`, the first hour the price applies from (UTC) and the input and output prices in micro-USD per 1000 tokens. A stored
-version is never changed or removed: a trigger refuses it, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). So check the values before you run it. A version dated before invoiced
-hours changes what those hours would be rated at. For a 409 in step 3, add every model it names, then ask for the charges again:
+version is never changed or removed: a trigger refuses it, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). So check the values before you run it. A wrong version is superseded by a newer one, not edited: add
+the corrected prices as the next version with the SAME first hour (a tie goes to the later version) and every hour from that first
+hour on is rated at it, invoiced hours included (run: 1500/3000 corrected to 1000/2000 moved the hour's line from `price_version` 1,
+6000 micros to `price_version` 2, 4000); a corrected version with a later first hour leaves the hours before it on the wrong version.
+A version dated before invoiced hours changes what those hours would be rated at. For a 409 in step 3, add every model it names, then ask for the charges again:
 in the run above the 409 `no price for model 'zz-model' at 2026-11-10T22:00:00+00:00` became a 200 with `price_version` 1.
 
 ## 7. A missing or doubled event

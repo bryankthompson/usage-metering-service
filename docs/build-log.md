@@ -243,9 +243,9 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   claim), all fixed or recorded here.
 - **20:23** The claims lane's re-check of the runbook, testing guide and demo page against the merged head found 0 major and 0
   minor findings and 1 note (a prerequisite sentence in the demo page, fixed). Its first report was applied in three small docs
-  branches: the citations in the code tour and design notes (#32: a script now checks that each cited line holds the code
-  its sentence is about, and it found 8 more wrong ranges than the lens had listed), the build log and the README's process
-  wording (#31), and one wording for what the append-only triggers do not stop (#33: TRUNCATE, or the table owner or a
+  branches: the citations in the code tour and design notes (#32: a script, run by hand and not kept in the repo, checked
+  every citation against the code its sentence is about, and it found 8 more wrong ranges than the lens had listed), the
+  build log and the README's process wording (#31), and one wording for what the append-only triggers do not stop (#33: TRUNCATE, or the table owner or a
   superuser, who can disable the trigger; run on a scratch database for both tables).
 - **20:25** Dev A ran the whole suite under a New York database session zone to recount the limit written at 18:00 and found
   that 13 of the 26 failures were not test assumptions: reconcile named the hour of a drift line in the zone's clock with a
