@@ -1,9 +1,14 @@
 # usage-metering-service
 
-A small prototype of a usage metering and billing service. Tenants report usage events (a model and
-input and output token counts); the service counts each event once, rolls the events up per hour, prices
-them in integer micro-USD, and serves only tenants whose Stripe test-mode subscription is in good standing.
-Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
+## Start here
+
+Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service stores each event
+once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
+To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test` runs the tests.
+Read next: [how it was built and checked](docs/how-it-was-built.md), [the review reports](docs/reviews/README.md),
+[a tour of the code](docs/code-tour.md), and [what is not built](#not-built).
+
+A small prototype. Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
 
 ## How it works
 
@@ -148,6 +153,13 @@ A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md
   loudly and the hour stays unclosed (known limit in [docs/ingest.md](docs/ingest.md)).
 - A database that freezes after a connection was made (a paused container) is not bounded by the timeouts, and neither
   is the first query after connecting (known limit in [docs/ingest.md](docs/ingest.md)).
+- Bounding the hour of an event: it is the client's `occurred_at`, and `received_at` (stored) is not used to limit it. A client
+  can date usage into an hour that is already closed (stored `late`, never billed) or far ahead (its hour cannot close until
+  it has ended, so it is not charged until then). `app.reconcile` reports both under `not billed:`; nothing refuses them.
+- A close per tenant: hours close for every tenant at once, so one tenant's event in an old quiet hour makes that hour close,
+  and another tenant's event for the same hour that arrives afterwards is `late` (stored, never billed).
+- Usage after access is cut: once the edge answers 402, a tenant cannot send usage it had not sent yet, because `/v1/usage`
+  sits behind the edge; the events are refused, not stored for later.
 
 ## How it was built
 
@@ -175,14 +187,15 @@ lane at a time, each as its own pull request (`git log --first-parent --merges` 
 operations), each told to break the code on its own lens and to count a finding only with a command or a failing test
 that shows it; a second round of the same four; a narrow third pass on one fix; and a fifth lane that checked every
 sentence of the README and docs against the code from a clean clone. Round one found 0 blockers, 9 major and 10 minor. Seven of the majors changed code: a bill that names
-every unpriced model, a same-second event that could undo a cancel, a held lock and a paused database that hung the whole
-API (now a 503), a request body buffered before the 401 (now capped), and one poisoned rollup hour that blocked every
-later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
+every unpriced model, a same-second event that could undo a cancel, a held lock that hung the whole API (now a 503), a paused
+database that hung it too (connecting now ends in a 503 after 5 s; a freeze after connecting still hangs, see
+[docs/ingest.md](docs/ingest.md)), a request body buffered before the 401 (now capped), and one poisoned rollup hour that
+blocked every later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
 lane's own repros against the fixed code and attacked the fixes: 0 blockers, 3 major, 7 minor. Two majors became code
 changes (a cancel older than an applied payment failure was lost; the database lives in a named volume now, because
 `docker compose down` followed by `up` had started an empty one); one is written down with its bound in
-[docs/ingest.md](docs/ingest.md) (a database that freezes after the connection was made). The review reports are not
-in this repository.
+[docs/ingest.md](docs/ingest.md) (a database that freezes after the connection was made). The review reports are in
+[docs/reviews/](docs/reviews/README.md), as written at the time.
 
 **What the gates and the cross-checks caught.**
 - DRC found that the hourly token sum can overflow a BIGINT column (now one failed hour that the others survive, and a

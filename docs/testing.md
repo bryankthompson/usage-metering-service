@@ -97,10 +97,10 @@ These were attacked and held; the test stays because the failure would be silent
 
 | Known limit (found, not fixed) | Where it is written down |
 |--|--|
-| The rollup sum is BIGINT: past 9.2e18 tokens one hour fails loudly and blocks later hours | `docs/ingest.md` Known limit; README Not built |
+| The rollup sum is BIGINT: past 9.2e18 tokens that hour's close fails (logged as `rollup failed: hour=...`, nothing written) and the hour stays unclosed; later hours still close | `docs/ingest.md` Known limit; README Not built |
 | The append-only trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger) | `docs/ingest.md` (first paragraph); README section 2 |
 | An hour with events closes for every tenant once it is 5 minutes old, so one tenant's event in an old quiet hour makes other tenants' later events for it late (stored, never billed) | here only (late events: `docs/ingest.md`) |
-| No real authentication; the first of repeated `X-Tenant-Id` headers wins | README Not built; `app/edge.py` docstring |
-| A webhook can store a tenant id the edge never admits (leading space or tab, control characters), and nothing binds a tenant to one customer id | here only (one customer per tenant: `docs/billing.md`) |
+| No real authentication; with repeated `X-Tenant-Id` headers the edge takes the first (by reading the code, and a one-line run of Starlette's `Headers.get`; the test accepts either tenant) | README Not built; `app/edge.py` docstring |
+| Nothing binds a tenant to one customer id. A tenant id the edge can never admit (leading space or tab, control characters) is refused for new events (`_tenant_id` in `app/webhooks.py`); a row stored before that rule still gets its later events, matched by its exact id | here only (one customer per tenant: `docs/billing.md`) |
 | A far-future Stripe `created` could pin `last_event_at` and make real events `stale` (by reading, not tested) | here only |
 | An interrupted first `up` leaves a half-built data volume, which `down` now keeps too (`down -v` removes it) | `docs/demo.md` |

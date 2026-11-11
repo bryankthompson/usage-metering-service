@@ -84,7 +84,7 @@ close is accepted (201) but stored as `"late": true`, because the hour is closed
 hour's lock, ingest gives 503, release, `close_hour`, resend gives 201 with `late: true` and the event is in no rollup row). A
 client that does not resend loses the event as well. A close that fails holds the same exclusive lock for the whole failed
 attempt, on every cycle (`close_hour` takes the lock first), so ingests for that hour see an intermittent 503 after 2 s
-(red team, RT-operations-13: retryable and visible). Not tested: an ingest transaction left `idle in transaction` while it
+(red team, RT-operations-13: retryable and visible; the reports are in [docs/reviews/](reviews/README.md)). Not tested: an ingest transaction left `idle in transaction` while it
 holds the shared hour lock would block that hour's close for as long as it stays open (the closing side has no timeout:
 `test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight`), and no `idle_in_transaction_session_timeout` is set.
 
