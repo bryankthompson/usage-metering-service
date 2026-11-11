@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.edge import require_entitlement
 from app.main import app
 from app.pricing import add_price_version
+from app.rollup import close_hour
 
 T0 = datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc)
 RANGE = {"start": "2026-11-01T00:00:00+00:00", "end": "2026-11-01T03:00:00+00:00"}
@@ -68,3 +69,35 @@ def test_charges_are_behind_the_edge(conn):
     seed(conn)
     resp = TestClient(app).get("/v1/tenants/tenant-1/charges", params=RANGE)
     assert resp.status_code in (401, 402, 503)
+
+
+@pytest.mark.parametrize("split", ["2026-11-01T10:30:00Z", "2026-11-01T11:00:00Z"])
+def test_a_range_split_inside_or_on_an_hour_bills_no_hour_twice_and_none_dropped(client, conn, split):
+    """An hour belongs to the range its START falls in (`start <= hour_start < end`, docs/billing.md), so
+    charges(a, b) + charges(b, c) == charges(a, c) for any b: mid-hour (10:30) and exactly on the hour (11:00)."""
+    add_price_version(conn, "m1", T0, 1000, 2000)
+    add_price_version(conn, "m2", T0, 1500, 3000)
+    sent = [("m1", "10:05", 1000, 500), ("m2", "10:40", 200, 100), ("m1", "11:10", 1, 0), ("m2", "11:55", 3, 3)]
+    for i, (model, at, tokens_in, tokens_out) in enumerate(sent):
+        r = client.post("/v1/usage", json={"tenant_id": "tenant-1", "idempotency_key": f"k{i}", "model": model,
+                                           "tokens_in": tokens_in, "tokens_out": tokens_out,
+                                           "occurred_at": f"2026-11-01T{at}:00Z"})
+        assert r.status_code == 201
+    for hour in (10, 11):
+        assert close_hour(conn, T0 + timedelta(hours=hour)) is not None
+
+    def charges(start, end):
+        r = client.get("/v1/tenants/tenant-1/charges", params={"start": start, "end": end})
+        assert r.status_code == 200
+        assert r.json()["unclosed_hours"] == []
+        return r.json()
+
+    whole = charges("2026-11-01T10:00:00Z", "2026-11-01T12:00:00Z")
+    first = charges("2026-11-01T10:00:00Z", split)
+    second = charges(split, "2026-11-01T12:00:00Z")
+    assert whole["total_micros"] == 2000 + 600 + 1 + 14                          # all four lines, once each
+    assert len(whole["lines"]) == 4
+    assert first["total_micros"] + second["total_micros"] == whole["total_micros"]
+    assert first["lines"] + second["lines"] == whole["lines"]                    # the same lines, none twice, none dropped
+    assert {line["hour_start"] for line in first["lines"]} == {"2026-11-01T10:00:00Z"}   # the hour that starts before the split
+    assert {line["hour_start"] for line in second["lines"]} == {"2026-11-01T11:00:00Z"}  # the hour that starts at or after it

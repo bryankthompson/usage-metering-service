@@ -18,7 +18,7 @@ from app.edge import require_entitlement
 from app.main import app
 from app.rollup import HOUR_LOCK_CLASS, close_hour, hour_index
 from tests.stripe_signing import SECRET, payment_failed_event, subscription_event
-from tests.test_attack_ingest import count, event, wait_until_blocked
+from tests.test_attack_ingest import blocked, count, event, wait_until_blocked
 from tests.test_webhooks import T, post, row
 
 H = datetime(2026, 11, 10, 10, tzinfo=timezone.utc)
@@ -83,6 +83,29 @@ def test_many_waiters_on_one_hour_do_not_hang_healthz_or_another_hour(client, co
             assert {w.result(timeout=15).status_code for w in waiters} == {503}
     assert (health.status_code, other.status_code) == (200, 201)
     assert answered_in < 3, "healthz and another hour waited for the held lock"
+
+
+def test_healthz_answers_while_every_worker_thread_is_parked_in_the_database(client, conn, monkeypatch):
+    """/healthz touches nothing, so it must not queue behind the ~40 threads the database routes use (RT-operations: with
+    50 requests parked in a query on a frozen database it stopped answering). 50 senders wait on a held hour lock with a
+    long wait; the lock is released after 5 s, so a /healthz that queues answers after about 5 s instead of at once."""
+    monkeypatch.setattr(db, "LOCK_WAIT", "30s", raising=False)
+    with held(*HOUR_LOCK, release_after=5.0), TestClient(app, raise_server_exceptions=False) as shared:
+        with ThreadPoolExecutor(max_workers=50) as pool:
+            senders = [pool.submit(shared.post, "/v1/usage", json=event(idempotency_key=f"k{i}")) for i in range(50)]
+            for _ in range(500):                                  # all 40 pool threads are inside the database wait
+                if blocked(conn, "advisory") >= 40:
+                    break
+                time.sleep(0.01)
+            else:
+                pytest.fail("the worker pool never filled with waiting requests")
+            started = time.monotonic()
+            health = shared.get("/healthz")
+            answered_in = time.monotonic() - started
+            statuses = {s.result(timeout=20).status_code for s in senders}
+    assert health.status_code == 200 and health.json() == {"status": "ok"}
+    assert answered_in < 1, f"/healthz waited {answered_in:.1f} s behind requests parked in the database"
+    assert statuses == {201}                                      # the parked requests finished normally once the lock went
 
 
 @pytest.fixture
