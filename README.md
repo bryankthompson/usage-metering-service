@@ -6,7 +6,7 @@ Usage metering and billing for AI inference traffic. Tenants report token counts
 once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
 To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test` runs the tests.
 Read next: [how it was built and checked](docs/how-it-was-built.md), [the review reports](docs/reviews/README.md),
-[a tour of the code](docs/code-tour.md), and [what is not built](#not-built).
+and [what is not built](#not-built).
 
 A small prototype. Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
 
