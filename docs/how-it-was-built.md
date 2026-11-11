@@ -31,8 +31,8 @@ to check, not as orders.
 9. One pull request per change. At the head this page was written from, `git log --first-parent --merges` lists 36 merged
    pull requests (#1 to #36).
 
-The repo does not store the receipts. The build log has no entries for #24 to #29, so for those the gate rests on the
-rule above, not on a record you can open here.
+The repo does not store the receipts. What it keeps is the merge commit of each pull request and the build log; for the
+review itself the gate rests on the rule above, not on a receipt you can open here.
 
 ## 3. How AI-written code was checked: independent layers
 
@@ -59,9 +59,10 @@ Each layer fails in a different way from the others. One example each.
 - **A lane that checked the words against the code.** A fifth lens read every sentence of the README and docs from a clean
   clone: 0 major and 9 minor findings (stale citations, an old count, a process claim). A script, run by hand and not
   kept in the repo, then checked every citation (#32).
-- **A clean-clone run of the final SHA.** Dev A ran the shipped path from a clean clone (start, demo, outage check, data
-  kept across `down` and `up`, 588 tests; 19:58 to 20:12). Dev B ran the suite from a clean clone at `e603a15`: 601 passed, also with
-  `PGTZ=America/New_York`, and checked 40 citations and every link.
+- **A clean-clone run of the final code.** Dev A ran the shipped path from a clean clone at `e603a15` (start, demo,
+  outage check, flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with
+  `PGTZ=America/New_York`; 20:51). Dev B ran the suite from its own clean clone at the same commit and checked 40
+  citations and every link. The commits after it change documentation only.
 - **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
   was checked by a person reading the diff.
 
