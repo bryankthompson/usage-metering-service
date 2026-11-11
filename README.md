@@ -18,8 +18,8 @@ tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **
 read (also with no credentials). A body the server cannot parse at all (for example JSON nested thousands deep): **400**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
-every row UPDATE and DELETE (it does not stop TRUNCATE, or the table owner or a superuser, who can disable the trigger).
-The application never rewrites an accepted event.
+every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the
+trigger). The application never rewrites an accepted event.
 
 **3. Hourly rollups.** `app/rollup.py` sums one UTC hour of events per tenant and model into
 `usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`
