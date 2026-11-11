@@ -8,10 +8,7 @@ To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test
 Read next: [how it was built and checked](docs/how-it-was-built.md), [the review reports](docs/reviews/README.md),
 [a tour of the code](docs/code-tour.md), and [what is not built](#not-built).
 
-A small prototype of a usage metering and billing service. Tenants report usage events (a model and
-input and output token counts); the service counts each event once, rolls the events up per hour, prices
-them in integer micro-USD, and serves only tenants whose Stripe test-mode subscription is in good standing.
-Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
+A small prototype. Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
 
 ## How it works
 
