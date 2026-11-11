@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# One command from a cold checkout to a priced, checked result: build and start the compose stack, start the stand-in
+# inference server, play scripts/scenario.py, and print the seconds each stage took. Extra arguments go to the scenario.
+# API_PORT / DB_PORT pick the compose ports; STAND_IN_PORT (default 8089) picks the stand-in's.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PORT=${STAND_IN_PORT:-8089}
+[[ " $* " != *" --stand-in-port"* ]] || { echo "FAIL: set the stand-in port with STAND_IN_PORT, not --stand-in-port"; exit 2; }
+API="http://localhost:${API_PORT:-8000}"
+declare -a NAMES SECS
+ms() { echo $(( ${EPOCHREALTIME/./} / 1000 )); }   # milliseconds, no bc needed
+T0=$(ms); T=$T0
+stage() { local now; now=$(ms); NAMES+=("$1"); SECS+=("$(( now - T ))"); T=$now; }
+report() {
+  local i total; total=$(( $(ms) - T0 ))
+  echo "stage timings (seconds, measured on this run):"
+  for i in "${!NAMES[@]}"; do printf '  %-28s %5d.%03d\n' "${NAMES[$i]}" $(( SECS[i] / 1000 )) $(( SECS[i] % 1000 )); done
+  printf '  %-28s %5d.%03d\n' total $(( total / 1000 )) $(( total % 1000 ))
+}
+STAND_IN_PID=
+cleanup() { [ -z "$STAND_IN_PID" ] || kill "$STAND_IN_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+
+docker compose up -d --build --wait
+stage "compose up (build, healthy)"
+
+# the api healthcheck covers the first call; this bounded poll is the loud failure if it still is not answering
+for _ in $(seq 1 30); do curl -sf "$API/healthz" >/dev/null && break || sleep 1; done
+curl -sf "$API/healthz" >/dev/null || { echo "FAIL: $API/healthz did not answer within 30 seconds"; exit 1; }
+stage "api answers /healthz"
+
+if [[ " $* " != *" --live "* ]]; then
+  python3 scripts/stand_in_inference.py --port "$PORT" & STAND_IN_PID=$!
+  for _ in $(seq 1 30); do (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break || sleep 0.2; done
+  kill -0 "$STAND_IN_PID" 2>/dev/null || { echo "FAIL: the stand-in server did not start (port $PORT busy?)"; exit 1; }
+  stage "stand-in server up"
+fi
+
+status=0
+python3 scripts/scenario.py --stand-in-port "$PORT" "$@" || status=$?
+stage "scenario"
+report
+exit $status

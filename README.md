@@ -4,7 +4,7 @@
 
 Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service stores each event
 once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
-To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test` runs the tests.
+To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test` runs the tests. Or `scripts/up`: one command that starts the stack, plays a three-tenant scenario against a stand-in inference server and checks the charges independently ([docs/demo.md](docs/demo.md)).
 Read next: [how it was built and checked](docs/how-it-was-built.md), [the review reports](docs/reviews/README.md),
 and [what is not built](#not-built).
 
