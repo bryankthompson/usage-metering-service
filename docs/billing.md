@@ -148,10 +148,9 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
   database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
   turn into 503; not tested under load.
-- **The database session time zone is assumed to be UTC** (the compose default). Under `PGTZ=America/New_York`, 16 of 507
-  tests fail: most read a timestamp back and compare its local clock hour or ISO text, which is a test assumption. One real
-  effect: an event dated `0001-01-01T00:00:00Z` is a 500 on `/v1/usage` in a zone west of UTC, because the stored instant
-  cannot be shown as a Python datetime there. Billing itself is right in any zone (`test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then`).
+- **The session time zone is pinned to UTC on every connection** (`db.connect` sets it in the statement that sets the statement
+  timeout), so `PGTZ`, a URL option or the server's setting cannot change the hours the app prints or reads back. The whole suite
+  passes under `PGTZ=America/New_York` (601 of 601 at 02e94c8). A connection opened by hand (`psql`) keeps its own zone.
 - **`LOG_LEVEL` does not override a handler that is already installed.** `configure_logging` sets the level of the `app`
   logger, but a root handler with its own stricter level, installed before the app starts, still filters the lines. Under
   `docker compose` no such handler exists. Found in review, not fixed.
