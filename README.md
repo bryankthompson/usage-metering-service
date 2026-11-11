@@ -117,7 +117,9 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   half-built volume (for example after an interrupted first start, or after an upgrade that adds a column) is not
   repaired by `up`. Every file in `db/` is repeatable and the image carries them, so apply them to the running stack
   without losing data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`.
-  Only `docker compose down -v` resets the data (it deletes it).
+  The data lives in the named volume `pgdata`, so `docker compose down` and a recreated container keep it, and only
+  `docker compose down -v` resets it (it deletes it). A stack started before the volume was named keeps its old data in an
+  anonymous volume: dump it with `pg_dump --data-only` before switching ([docs/demo.md](docs/demo.md)).
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS` and `LOG_LEVEL` (default `INFO`; an invalid value falls back to it). To test against your own database:
