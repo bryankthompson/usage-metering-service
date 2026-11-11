@@ -92,6 +92,10 @@ makes any of them exit 1, `--json` prints one object ([docs/reconcile.md](docs/r
 with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`) using the edge's own grace rule
 ([docs/billing.md](docs/billing.md)).
 
+**8. An optional ClickHouse copy.** With `CLICKHOUSE_URL` set, each closed hour's rollup rows are also written to ClickHouse
+(`docker compose --profile analytics`); a failure there is logged and never touches the bill, `python -m app.mirror --backfill`
+recovers it, and `--export-actuals` feeds `app.reconcile --actuals` ([docs/clickhouse.md](docs/clickhouse.md)). It is a derived copy, not the bill.
+
 **8. A platform adapter, not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
 response (chat, embeddings or the final stream chunk) into one usage event, with the response id as the idempotency key; a
 missing usage raises and is never counted as zero. It was built from the public API documentation and tested with
@@ -140,7 +144,8 @@ A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md
 
 ## Not built
 
-- Correcting drift: `app.reconcile` reports a difference and changes nothing.
+- Correcting drift: `app.reconcile` reports a difference and changes nothing. (`app.mirror --backfill` only re-copies the optional ClickHouse mirror.)
+- ClickHouse at scale or in production: the mirror is a small optional copy (`docs/clickhouse.md`), run by hand on one local node.
 - Any call to the inference platform the adapter is written for (no key), and its per-model prices: the prices in the tests are illustrative.
 - Cluster manifests, a dashboard, late adjustments and the other items listed in [docs/design-notes.md](docs/design-notes.md).
 - Pushing usage to Stripe, invoices, or any call to Stripe.
