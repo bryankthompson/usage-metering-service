@@ -102,6 +102,21 @@ def rate(conn: psycopg.Connection, model: str, tokens_in: int, tokens_out: int, 
     return _rate(price_at(conn, model, at), tokens_in, tokens_out)
 
 
+MAX_NAMED_MODELS = 20
+
+
+def _unpriced_message(unpriced: dict[str, datetime]) -> str:
+    """One model keeps the message `price_at` gives. Several are listed sorted, each with its first unpriced hour, at most
+    MAX_NAMED_MODELS of them and then "and N more", so the operator can add every missing price in one pass."""
+    names = sorted(unpriced)
+    if len(names) == 1:
+        return f"no price for model {names[0]!r} at {unpriced[names[0]].isoformat()}"
+    listed = [f"{name!r} at {unpriced[name].isoformat()}" for name in names[:MAX_NAMED_MODELS]]
+    if len(names) > MAX_NAMED_MODELS:
+        listed.append(f"and {len(names) - MAX_NAMED_MODELS} more")
+    return f"no price for {len(names)} models: " + ", ".join(listed)
+
+
 def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime) -> tuple[list[dict], int]:
     """Rate every hourly rollup row of the tenant with `start <= hour_start < end`, each at its own hour_start.
 
@@ -127,10 +142,12 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
             loaded[v["model"]].append(v)
     keys = {model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()}
     lines = []
+    unpriced: dict[str, datetime] = {}               # model -> the first hour in range with no price (rows are in hour order)
     for row in rows:
         version = _in_force(keys[row["model"]], loaded[row["model"]], row["hour_start"])
         if version is None:
-            raise NoPrice(f"no price for model {row['model']!r} at {row['hour_start'].isoformat()}")
+            unpriced.setdefault(row["model"], row["hour_start"])     # keep going: name every unpriced model, not just the first
+            continue
         lines.append({
             "model": row["model"],
             "hour_start": row["hour_start"],
@@ -139,6 +156,8 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
             "price_version": version["version"],
             "micros": _rate(version, row["tokens_in"], row["tokens_out"]),
         })
+    if unpriced:                                     # all or nothing: no partial bill
+        raise NoPrice(_unpriced_message(unpriced))
     total = sum(line["micros"] for line in lines)
     log.info("charges computed: tenant=%r start=%s end=%s lines=%d total_micros=%d",
              tenant_id, start.isoformat(), end.isoformat(), len(lines), total)
