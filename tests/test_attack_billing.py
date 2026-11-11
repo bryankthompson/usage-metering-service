@@ -386,3 +386,16 @@ def test_a_price_version_that_cannot_be_decoded_does_not_break_a_bill_for_a_past
     rollup(conn, "t1", "m1", T0, 1000, 1000)
     lines, total = charge_lines(conn, "t1", T0, T0 + HOUR)
     assert total == 3000 and [ln["price_version"] for ln in lines] == [1]
+
+
+def test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then(conn):
+    # In New York the clock reads 01:00 twice on 2026-11-01 (05:00Z, then 06:00Z). Aware datetimes in one zone compare by
+    # wall clock, so with the session in that zone the 05:00Z row looked as late as the 06:00Z price. UTC sessions hide it.
+    conn.execute("SET TIME ZONE 'America/New_York'")
+    first, second = datetime(2026, 11, 1, 5, tzinfo=timezone.utc), datetime(2026, 11, 1, 6, tzinfo=timezone.utc)
+    add_price_version(conn, "m1", T0 - 24 * HOUR, 1000, 0)    # v1
+    add_price_version(conn, "m1", second, 5000, 0)             # v2 takes effect at 06:00Z
+    rollup(conn, "t1", "m1", first, 1000, 0)
+    rollup(conn, "t1", "m1", second, 1000, 0)
+    lines, _ = charge_lines(conn, "t1", first, second + HOUR)
+    assert [(ln["price_version"], ln["micros"]) for ln in lines] == [(1, 1000), (2, 5000)]

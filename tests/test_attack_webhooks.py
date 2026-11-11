@@ -355,3 +355,20 @@ def test_a_tenant_id_at_the_limit_is_stored_and_one_over_is_ignored_and_logged(c
     assert post(client, sub_event_with("evt_201", metadata={"tenant_id": "t" * 201})).json() == {"status": "ignored"}
     assert [r["tenant_id"] for r in conn.execute("SELECT tenant_id FROM entitlements").fetchall()] == ["t" * 200]
     assert "is not usable" in caplog.text
+
+
+@pytest.mark.parametrize("odd", ["x" * 250, " padded ", "tab\tinside\x07"])
+def test_a_cancel_reaches_a_stored_row_whose_id_the_rule_would_refuse(client, conn, odd):
+    # A row stored before the id rule (or by hand) must stay reachable: a lost cancel is a 200 Stripe never retries.
+    conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES (%s, 'active')", (odd,))
+    conn.commit()
+    resp = post(client, subscription_event("evt_cancel", int(time.time()), tenant_id=odd,
+                                           event_type="customer.subscription.deleted"))
+    assert (resp.status_code, resp.json()) == (200, {"status": "processed"})
+    assert conn.execute("SELECT status FROM entitlements WHERE tenant_id = %s", (odd,)).fetchone()["status"] == "canceled"
+
+
+def test_an_unusable_id_with_no_stored_row_is_still_ignored_and_creates_nothing(client, conn):
+    resp = post(client, subscription_event("evt_new", int(time.time()), tenant_id="x" * 250))
+    assert (resp.status_code, resp.json()) == (200, {"status": "ignored"})
+    assert counts(conn) == (0, 0)

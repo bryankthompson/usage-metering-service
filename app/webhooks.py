@@ -107,6 +107,9 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     metadata = sub.get("metadata")
     raw_tenant = metadata.get("tenant_id") if isinstance(metadata, dict) else None
     tenant_id = _tenant_id(raw_tenant)
+    if not tenant_id and _text(raw_tenant) and conn.execute(
+            "SELECT 1 FROM entitlements WHERE tenant_id = %s", (raw_tenant,)).fetchone():
+        tenant_id = raw_tenant   # a row stored before the id rule (or by hand) stays reachable: a lost cancel is never retried
     if not tenant_id:
         if raw_tenant is not None:
             log.warning("webhook ignored: tenant_id %.80r is not usable (1 to %d characters, no control characters, "

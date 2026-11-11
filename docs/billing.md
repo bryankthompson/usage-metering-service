@@ -39,7 +39,9 @@ No admin API: prices are added through `add_price_version`. Nothing is sent to S
 created or updated) or, for invoices, the `entitlements` row with that `stripe_customer_id`. No tenant found: 200
 `{"status": "ignored"}`, logged, not recorded. Other event types are ignored the same way, and so is a subscription
 whose `tenant_id` is not usable text: over 200 characters (the limit `/v1/usage` has), a control character or a lone
-surrogate in it, or a space or tab at either end (the edge trims the header, so such a tenant could never match).
+surrogate in it, or a space or tab at either end (the edge trims the header, so such a tenant could never match),
+unless an entitlement row with exactly that id already exists: a row stored before the rule (or by hand) is still
+reached, so a cancel for it is not lost.
 
 | Event | Effect |
 |---|---|
@@ -100,9 +102,10 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
   database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
   turn into 503; not tested under load.
-- **A cancel for an entitlement row with an unusable id is ignored.** The webhook refuses a tenant id over 200 characters or
-  with control characters or edge whitespace, for a cancel too. The app cannot create such a row (the same rule refuses it),
-  so only a row inserted by hand is affected, and it would stay as it is. Found in review, not fixed.
+- **The database session time zone is assumed to be UTC** (the compose default). Under `PGTZ=America/New_York`, 16 of 507
+  tests fail: most read a timestamp back and compare its local clock hour or ISO text, which is a test assumption. One real
+  effect: an event dated `0001-01-01T00:00:00Z` is a 500 on `/v1/usage` in a zone west of UTC, because the stored instant
+  cannot be shown as a Python datetime there. Billing itself is right in any zone (`test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then`).
 - **`LOG_LEVEL` does not override a handler that is already installed.** `configure_logging` sets the level of the `app`
   logger, but a root handler with its own stricter level, installed before the app starts, still filters the lines. Under
   `docker compose` no such handler exists. Found in review, not fixed.
