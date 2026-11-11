@@ -103,7 +103,7 @@ since it is `async` it does not (live, db paused with 50 requests parked: no ans
 keepalives_interval=2 keepalives_count=3 tcp_user_timeout=15000` in `DATABASE_URL` (psycopg reported `tcp_user_timeout` 15000 on
 the connection), left 50 requests parked in a lock wait on a paused db still waiting at 16, 30, 45 and 65 s of an 80 s
 freeze. The kernel of a frozen container keeps acknowledging and answering probes, so the options help only against a dead host
-or a cut network. They are not set. (My requests were in a lock wait, not a running query; the red team's run with a query
+or a cut network. They are not set. (The requests in this run were in a lock wait, not a running query; the red team's run with a query
 hung the same way.)
 **While frozen:** each parked request holds a worker thread; 40 of them fill the pool, and then a new request that needs a
 thread gets no answer (nothing in 20 s, run) while `/healthz` answers. With only a few parked, a new request is a 503

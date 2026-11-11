@@ -1,12 +1,14 @@
 # Runbook: an invoice looks wrong
 
-For on-call. Run from the repo on the host that runs `docker compose`. Every command below was run as written on a stack built from
+For on-call. Run from the repo on the host that runs `docker compose`. Every command below was run on a stack built from
 `main` and seeded by `scripts/demo.sh`, plus a late event, two unpriced models, a past_due and a canceled tenant, an hour that
-cannot close and a stopped database; the output is trimmed and the names are from that run. Money is integer micro-USD
-(1,000,000 = 1 USD).
+cannot close, a stopped database and a paused one; the output is trimmed and the names are from that run. Those marked "not run
+here" were not run. Square brackets mark options; capitals (`START`, `MODEL`) are for you to fill in. The repo names no owner or
+channel for this service: where a step says to ask, ask whoever runs it. Money is integer micro-USD (1,000,000 = 1 USD).
 
-    export BASE=http://localhost:8000 T=demo-1794359437      # your tenant; BASE uses API_PORT
+    export BASE=http://localhost:8000 T=demo-1794359437      # T: the customer's tenant id (scripts/demo.sh prints its own on its step 1 line); BASE uses API_PORT
     psql() { docker compose exec -T db psql -U metering -d metering "$@"; }
+The tenant and the dates in the examples below (2026-11-10 and 11) come from one run: use your tenant and your UTC hours.
 
 ## 1. Pin the claim
 Write down: tenant `T`, period `[START, END)` in UTC (charges are per UTC hour), expected micros, billed micros (step 3).
@@ -70,7 +72,8 @@ unless `--fail-on-unbilled`, then any of these makes it 1; `--json` prints one o
     not billed: unclosed events=0 tokens_in=0 tokens_out=0 (its hour ended over 2 hours ago and is still not closed)
     not billed: future events=0 tokens_in=0 tokens_out=0 (dated over 1 hour ahead)
     reconcile: hours=2 rows=4 drift=0
-`actuals.jsonl` is one object per line: `tenant_id, model, hour, tokens_in, tokens_out`. Exit 1 = drift, 2 = bad argument or file
+`actuals.jsonl` is the other source you compare against (the usage the customer or another system reports, which you write out yourself),
+one object per line: `tenant_id, model, hour, tokens_in, tokens_out`. Exit 1 = drift, 2 = bad argument or file
 (`--hour` must be a closed hour: `... is not a closed hour`). Drift lines (the summary reads `hours=1 rows=2 drift=1` and so on):
 
     DRIFT tenant=demo-... model=demo-model hour=2026-11-10T23:00:00Z tokens_in rollup=3007 events=3000
@@ -81,7 +84,7 @@ unless `--fail-on-unbilled`, then any of these makes it 1; `--json` prints one o
     DRIFT ... rollup row but no actual (rollup=(3000, 500))      DRIFT ... actual but no rollup row (actual=(10, 10))
 Different sums, a missing row, an extra row and a row whose `closed_hours` entry is gone (charges still bills it) mean the table
 and the log disagree: the table was changed outside `app.rollup` or the rollup code is wrong (the close is one transaction, so a
-failed close leaves no row). Do not edit it; escalate with the line. A `beyond N bps`, `no actual` or `actual but no rollup row`
+failed close leaves no row). Do not edit it; ask whoever runs this service, and attach the `DRIFT` line and the reconcile output. A `beyond N bps`, `no actual` or `actual but no rollup row`
 line compares with the other source: the usage the customer or Stripe saw was not all ingested, or was late (5).
 Next: 5 if the numbers agree with the log but not the customer.
 
@@ -112,8 +115,15 @@ it, so another tenant's later event for that hour is late. Billing late events i
 The version used is the greatest `effective_from <= hour_start` (a tie goes to the later version), so a price that starts mid-hour
 applies from the next hour. Compare with the `price_version` on the line; `pricing.price_at(conn, model, at)` returns it, or
 raises `NoPrice: no price for model 'mystery-model' at ...` (never rated as zero). A missing price is added with
-`app.pricing.add_price_version(conn, model, effective_from, in_per_1k, out_per_1k)`; there is no CLI or API for it, and a version
-dated before invoiced hours changes what those hours would be rated at.
+`app.pricing.add_price_version(conn, model, effective_from, in_per_1k, out_per_1k)`, which commits and returns the version number;
+there is no CLI or API for it:
+
+    docker compose exec -T api python -c "from datetime import datetime, timezone as z; from app import db, pricing; print(pricing.add_price_version(db.connect(), 'MODEL', datetime(2026,11,10,22,tzinfo=z.utc), 1500, 3000))"
+    1
+Fill in `MODEL`, the first hour the price applies from (UTC) and the input and output prices in micro-USD per 1000 tokens. A stored
+version is never changed or removed (a trigger refuses it), so check the values before you run it. A version dated before invoiced
+hours changes what those hours would be rated at. For a 409 in step 3, add every model it names, then ask for the charges again:
+in the run above the 409 `no price for model 'zz-model' at 2026-11-10T22:00:00+00:00` became a 200 with `price_version` 1.
 
 ## 7. A missing or doubled event
     psql -c "SELECT id, idempotency_key, model, tokens_in, tokens_out, occurred_at, received_at, late FROM usage_events
@@ -133,7 +143,8 @@ not `received_at`. Doubled: the service dedupes only on (tenant, key); two keys 
     psql -c "SELECT model, tokens_in, tokens_out, occurred_at, array_agg(idempotency_key ORDER BY id) AS keys FROM usage_events
              WHERE tenant_id = '$T' GROUP BY 1,2,3,4 HAVING count(*) > 1"
      demo-model | 400 | 100 | 2026-11-10 23:45:00+00 | {late-1,late-1-retry}
-A doubled event cannot be deleted (a trigger refuses UPDATE and DELETE) and there is no adjustment feature: escalate for a manual credit.
+A doubled event is refused deletion by a trigger on UPDATE and DELETE (the table owner can bypass it: do not) and there is no
+adjustment feature: ask whoever runs this service for a manual credit, with the two keys from the query above.
 
 ## 8. Webhooks and grace
     psql -c "SELECT event_id, type, received_at FROM stripe_events ORDER BY received_at"
@@ -152,7 +163,7 @@ type, or a failed payment for a `canceled` tenant). The HTTP answer is `{"status
     2026-11-11 01:14:16,024 WARNING app.webhooks webhook tie after cancel: event='evt4_tie_late_active' type='customer.subscription.updated' tenant='tie-co' shares the second of the cancel and is stale
     2026-11-11 01:11:36,665 WARNING app.webhooks webhook refused: No signatures found matching the expected signature for payload
 A subscription event stamped with the same second as a cancel is `stale` (a tie never undoes a cancel: the `tie after cancel`
-line). Or use Stripe's delivery log, which shows our response body. Refusals: 400 `invalid signature or payload` (bad signature),
+line). Or use Stripe's own list of deliveries, which should show the response Stripe got (Stripe's side: not checked here, nothing in this repo calls Stripe). Refusals: 400 `invalid signature or payload` (bad signature),
 413 `webhook body too large` (over 1 MiB), 503 `database unavailable` (database down; step 11), 503 `webhook secret not configured`
 (no or blank `STRIPE_WEBHOOK_SECRET`) or 503 `grace period not configured` (`GRACE_PERIOD_HOURS` out of range). A payment failure
 opens grace for `GRACE_PERIOD_HOURS` (default 72, 0 to 8760) from the FIRST failure; later retries do not extend it; an `active`
@@ -165,7 +176,7 @@ event clears it; a cancel clears it and nothing but a subscription event reopens
 Read `unclosed_hours`. `[]`: the bill holds every closed hour; the gap is late events (step 5), a price (step 6) or a missing
 event (step 7). Not empty: the total is partial. An hour that is current or ended less than about 65 minutes ago is normal (due
 5 minutes after it ends, then the hourly loop): ask again later. An older hour that stays in the list is one the rollup cannot
-close: `docker compose logs rollup | grep "rollup failed"`, then step 10. `reconcile` shows the same usage on its `unclosed` line.
+close: `docker compose logs rollup | grep "rollup failed"`, then step 10. `reconcile` shows the same usage on its `unclosed` line once the hour ended over 2 hours ago.
 
 ## 10. One hour will not close
     docker compose logs rollup | grep "rollup failed"
@@ -180,8 +191,8 @@ log as tenant data). Find who is in that hour (a sum past 9.2e18 tokens, from ev
     psql -c "SELECT tenant_id, model, count(*) AS events, sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out FROM usage_events
              WHERE date_trunc('hour', occurred_at, 'UTC') = '2026-11-10T20:00:00Z' AND NOT late GROUP BY 1, 2 ORDER BY 4 DESC"
      demo-1794359437 | demo-model | 2 | 10000000000000000000 | 0
-What to do: read `error=`. `bigint out of range`: no command closes it. The events cannot be deleted (append-only) and the columns
-stay BIGINT until a developer widens them (docs/ingest.md, Known limit): escalate with the line and this output; until then the hour
+What to do: read `error=`. `bigint out of range`: no command closes it. The events are refused deletion by the append-only trigger (the table owner can bypass it: do not) and the columns
+stay BIGINT until a developer widens them (docs/ingest.md, Known limit): ask whoever runs this service, with the `rollup failed` line and this output; until then the hour
 is not billed and stays in `unclosed_hours`. Any other error: fix the cause it names (the one reproduced here was a CHECK constraint added by hand
 on `usage_rollups_hourly` and then dropped), then run `python -m app.rollup` again (above) or wait one cycle; the hour closes
 with the same numbers and `closed hour=...` prints:
@@ -219,6 +230,7 @@ within seconds and can be resent. Or `docker compose restart api` (about 5 s): t
 503 `entitlement check unavailable` after 5 s until the db is back. Both measured with a paused db and 50 requests in flight.
 
 ## 12. 413 on /v1/usage
+    python3 -c "print('x'*70000)" > body.json      # any body over 65,536 bytes; creates body.json in the current directory
     curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @body.json | sed -n '1p;$p'
     HTTP/1.1 413 Request Entity Too Large
     {"detail":"request body too large"}
@@ -227,7 +239,7 @@ credential check, so a caller with no `X-Tenant-Id` gets 413 too. An event is a 
 the wrong thing or a batch: look at the client, not the service. The access line is `"POST /v1/usage HTTP/1.1" 413` in
 `docker compose logs api`. The webhook has its own limit (1 MiB, `webhook body too large`, step 8).
 
-## Symptom | most likely cause | where to look
+## Symptoms at a glance
 | Symptom | Most likely cause | Look at |
 |--|--|--|
 | Total is 0 or `lines: []` | hour not closed yet (`unclosed_hours`), events all late, or no events | 3, 5 |
