@@ -6,7 +6,7 @@ Money is an integer count of micro-USD (1 USD = 1,000,000). No float and no true
 - `price_versions` holds, per model, numbered versions (1, 2, ...) with an `effective_from` and two integer
   prices: micro-USD per 1,000 input tokens and per 1,000 output tokens.
 - `add_price_version` always adds the next version. A stored version is never changed or removed: a database
-  trigger rejects UPDATE and DELETE.
+  trigger rejects UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger).
 - `price_at(model, at)` returns the version with the greatest `effective_from <= at` (a tie goes to the later
   version). No version in force raises `NoPrice`; a missing price is never rated as zero.
 - Charges rate a whole hour at the price in force at the START of that hour, so a version applies from the first
