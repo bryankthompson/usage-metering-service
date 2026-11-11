@@ -14,7 +14,8 @@ One `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` does the de
 requests at the same instant store one event. New event: **201** `accepted`. Resend with the same key and
 payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
 different payload: **409**. Body `tenant_id` is not the
-tenant the edge admitted: **403**. Invalid body: **422**.
+tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**, answered before the body is
+read (also with no credentials).
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE (TRUNCATE and a superuser are not stopped). The application never rewrites an
@@ -27,7 +28,9 @@ it hourly as the `rollup` service). Late and duplicate events never change a clo
 UTC hour is already closed is stored with `late = true` and answered 201 with `"late": true` (a resend says
 so too), but it is left out of the rollup, so it is never charged. Ingest takes a shared advisory lock on the event's hour and closing
 takes the exclusive one, so every event of a closed hour is either in its closed rollup or flagged late,
-never both and never neither. Details and the known limit: [docs/ingest.md](docs/ingest.md).
+never both and never neither. Each hour is closed on its own: if one fails (for example a sum past BIGINT) it is rolled
+back, logged as `rollup failed: hour=...` and skipped, the hours after it still close, a one-shot run exits 1, and the
+`--every` loop retries it each cycle. Details and the known limits: [docs/ingest.md](docs/ingest.md).
 
 **4. Versioned prices in micro-USD.** `app/pricing.py`. Each model has numbered price versions with an
 `effective_from` and two integer prices, micro-USD per 1,000 input and per 1,000 output tokens (1 USD =
@@ -36,9 +39,11 @@ never both and never neither. Details and the known limit: [docs/ingest.md](docs
 is never rated as zero. A rate is `(tokens_in * input_price + tokens_out * output_price) / 1000` in integer
 arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at the price in
 force at the start of its hour, so a price change applies from the first hour that starts at or after its effective time
-(a version effective at 10:30 applies from the 11:00 hour). Charges cover closed hours only and nothing stores a bill. **403** for another tenant, **422**
-for a naive timestamp, a `start` or `end` that is not ISO 8601 text, or `start >= end`, **409** when a row has no price in force. Details:
-[docs/billing.md](docs/billing.md).
+(a version effective at 10:30 applies from the 11:00 hour). Nothing stores a bill. Charges cover closed hours only:
+`unclosed_hours` in the answer lists the hours in the range that hold usage but are not closed yet (the earliest 100), so a
+total with a non-empty list is partial. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
+not ISO 8601 text, `start >= end`, or a range wider than 366 days, **409** when a row has no price in force (the message
+names every model without one, with its first hour). Details: [docs/billing.md](docs/billing.md).
 
 **5. Stripe test-mode webhooks set the entitlement.** `POST /v1/stripe/webhook` (`app/webhooks.py`) checks
 the `Stripe-Signature` header on the raw body with `STRIPE_WEBHOOK_SECRET` before it touches the database:
@@ -65,11 +70,15 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 **6. A fail-closed edge.** `require_entitlement` (`app/edge.py`) guards `/v1/usage` and the charges route.
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
-Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`).
+Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
+a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored), a connection that takes more than 5 s to open and a
+statement that runs more than 15 s on the request path; the rollup, reconcile and delinquent runs have no statement timeout.
 
 **7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and
-exits 0 when the stored rollups agree, 1 on drift, 2 on bad input; `--actuals FILE.jsonl` also compares them with totals from
-another source ([docs/reconcile.md](docs/reconcile.md)). `python -m app.delinquent` lists `past_due` and `canceled` tenants
+exits 0 when the stored rollups agree, 1 on drift (including a rollup row whose hour is not closed), 2 on bad input;
+`--actuals FILE.jsonl` also compares them with totals from another source. It always prints what is not billed (late
+events, events over 2 hours past their hour and still not closed, events dated over 1 hour ahead); `--fail-on-unbilled`
+makes any of them exit 1, `--json` prints one object ([docs/reconcile.md](docs/reconcile.md)). `python -m app.delinquent` lists `past_due` and `canceled` tenants
 with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`) using the edge's own grace rule
 ([docs/billing.md](docs/billing.md)).
 
@@ -84,8 +93,8 @@ hand-written fixtures, the real app and a local stand-in server. No call to the 
 | Method | Path | Success | Other answers |
 |--|--|--|--|
 | GET | `/healthz` | 200 `{"status": "ok"}` | none; no edge check |
-| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 422; edge 401, 402, 503 |
-| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros}` | 403, 409, 422; edge 401, 402, 503 |
+| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 413, 422; edge 401, 402, 503 |
+| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503; no edge check, the signature is the check |
 
 ## Run it
@@ -96,7 +105,8 @@ scripts/demo.sh                # an end-to-end run against that stack (needs cur
 scripts/test                   # runs the tests against a Postgres 16 container it starts in docker
 ```
 
-The API and database ports listen on 127.0.0.1 only (`API_PORT` and `DB_PORT` change them). The demo prices a
+The API and database ports listen on 127.0.0.1 only (`API_PORT` and `DB_PORT` change them); the container runs as an
+unprivileged user. If something fails while it runs, start at [docs/runbook.md](docs/runbook.md). The demo prices a
 model, sends a locally signed subscription event, posts usage (with a resend), closes the hour with the rollup
 and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo.md). Two things to know:
 - Give the API a few seconds after `up -d`. A demo run before it listens prints `FAIL step 3 ... got 000`:
@@ -112,6 +122,7 @@ The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Setting
 `DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
 on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
 How it is tested, with a burst check and a database outage check you can run on a live stack, and what is not covered: [docs/testing.md](docs/testing.md).
+A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md).
 
 ## Not built
 
@@ -127,8 +138,10 @@ How it is tested, with a burst check and a database outage check you can run on 
 - Private deployments that cannot report to a central service.
 - A query API over rollups, and an API to add prices (prices are added with `add_price_version`).
 - Billing late events: they are stored and flagged, never rolled up, and no application code reopens a closed hour.
-- Token columns wider than BIGINT: one tenant, model and hour that sum past 9.2e18 tokens stops the rollup
-  loudly (known limit in [docs/ingest.md](docs/ingest.md)).
+- Token columns wider than BIGINT: one tenant, model and hour that sum past 9.2e18 tokens fails that hour's close
+  loudly and the hour stays unclosed (known limit in [docs/ingest.md](docs/ingest.md)).
+- A database that freezes after a connection was made (a paused container) is not bounded by the timeouts, and neither
+  is the first query after connecting (known limit in [docs/ingest.md](docs/ingest.md)).
 
 ## How it was built
 
