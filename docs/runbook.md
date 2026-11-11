@@ -9,6 +9,7 @@ channel for this service: where a step says to ask, ask whoever runs it. Money i
     export BASE=http://localhost:8000 T=demo-1794359437      # T: the customer's tenant id (scripts/demo.sh prints its own on its step 1 line); BASE uses API_PORT
     psql() { docker compose exec -T db psql -U metering -d metering "$@"; }
 The tenant and the dates in the examples below (2026-11-10 and 11) come from one run: use your tenant and your UTC hours.
+These commands paste `$T` into a quoted SQL string, so a tenant id that contains a single quote is not supported here.
 
 ## 1. Pin the claim
 Write down: tenant `T`, period `[START, END)` in UTC (charges are per UTC hour), expected micros, billed micros (step 3).
