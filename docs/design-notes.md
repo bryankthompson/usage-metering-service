@@ -11,16 +11,17 @@ The rule: write the fact down first, derive everything else from it, and when un
 - **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:26-32`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
 - **Prices versioned.** A stored price version cannot change; a new price is a new version (`db/002_billing.sql:14-23`,
-  `app/pricing.py:42-43`). Money is integer micro-USD (`docs/billing.md`).
-- **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`app/edge.py:41-53`).
+  `app/pricing.py:55-56`). Money is integer micro-USD (`docs/billing.md`).
+- **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`app/edge.py:52-64`).
 
 ## 2. Where things would attach (NOT BUILT)
 
 **A queue or stream in front of ingest.** The seam is the single `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
-(`app/ingest.py:28-35`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
+(`app/ingest.py:57-64`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
 changes: `POST /v1/usage` would publish and answer once the broker has the message, so a 201 would mean "queued", not "stored"
-(today 201 means committed, `app/ingest.py:67-72`), and the `late` flag could not be returned to the caller. What stays: the log,
-the shared hour lock taken by the consumer (`app/ingest.py:66`) and the rollup. Failure added: a message the consumer cannot
+(today 201 means committed, `app/ingest.py:139-144`), and the `late` flag could not be returned to the caller. What stays: the log,
+the shared hour lock taken by the consumer (`app/ingest.py:138`) and the rollup. The 422 checks (`tenant_id`, `idempotency_key` and `model` capped at 200 characters, `app/ingest.py:51,79`) would have to
+run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
 **A columnar store for rollups at scale.** The seam is `AGGREGATE_HOUR` and the two rollup tables (`app/rollup.py:26-32`,
@@ -29,18 +30,21 @@ store (a dual write). What stays: the log remains the source and the Postgres ro
 columnar totals as the JSON lines file `app.reconcile --actuals` already reads (`docs/reconcile.md`); drift above tolerance exits 1.
 Failure added: the second write can fail after the first commits, so it needs its own retry and the reconcile run is the detector.
 
-**Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check
-(`compose.yaml:13-17`); `api` is `uvicorn` and waits for a healthy `db`; `rollup` is `python -m app.rollup --every 3600` with
-`restart: unless-stopped` (`compose.yaml:31-39`). `api` has no health check although the app has `GET /healthz`
-(`app/main.py:9-11`). A cluster would add liveness and readiness probes on `/healthz` (which does not touch the database), a
-CronJob or equivalent for the rollup instead of a sleeping loop, and secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in
-the file. No manifests are written and none are tested.
+**Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
+`restart: unless-stopped` (`compose.yaml:13-18`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
+(`compose.yaml:20-32`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:34-42`).
+Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:46-48`). The API answers 503 on
+every route when the database is unreachable (`app/main.py:36-44`) and 413 to a webhook body over 1 MiB
+(`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
+`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:16-30`). A cluster would add liveness and readiness probes
+on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and
+secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in the file. No manifests are written and none are tested.
 
 **Private deployments that cannot report to a central service.** A site-side spool would write usage events as JSON lines in the
 same shape as the `POST /v1/usage` body, with the same idempotency keys. The file is carried out of the boundary and imported
 through the same insert, so importing it twice is safe (replay-safe by the key). What stays: everything after the insert.
 The limit: an event for an hour that is already closed here is stored and flagged `late = true` and is never billed
-(`app/ingest.py:31-32`, `docs/ingest.md`). A real design needs a late-adjustment rule, such as a credit or debit line on a later
+(`app/ingest.py:60-61`, `docs/ingest.md`). A real design needs a late-adjustment rule, such as a credit or debit line on a later
 invoice. That rule is NOT designed.
 
 **Pushing usage to a payment provider.** The seam is the closed rollup rows. It needs a table of pushed hours, an idempotency
@@ -51,13 +55,13 @@ provider today (`README.md`, "Not built").
 
 | Decision | Why | Cost |
 |--|--|--|
-| Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`app/rollup.py:50-52,74`, `app/ingest.py:64-66`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
+| Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`app/rollup.py:50-52,74`, `app/ingest.py:136-138`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
 | Late events flagged and never billed, instead of reopening a closed hour | A closed hour never changes, so a bill already produced stays true (`docs/ingest.md`, "Late events"). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
 | Grace counted from the first failure | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
-| Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`app/webhooks.py:22-23,74`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
+| Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`app/webhooks.py:22-23,125-126`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
 | Prices as immutable versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`db/002_billing.sql:14-23`). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
-| The edge reads the entitlement on its own connection | A database that is down answers 503 at the edge instead of an unrelated 500 (`app/edge.py:34-46`, `docs/ingest.md`). | One extra connection per request. |
+| The edge reads the entitlement on its own connection | A database that is down fails at the edge as 503 and never lets the request through (`app/edge.py:38-40,52-57`); a handler in `app/main.py:36-44` now also answers 503 for a database that dies after the edge check. | One extra connection per request. |
 | Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
 
 ## 4. A day against a week
