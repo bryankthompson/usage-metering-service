@@ -15,7 +15,7 @@ requests at the same instant store one event. New event: **201** `accepted`. Res
 payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
 different payload: **409**. Body `tenant_id` is not the
 tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**, answered before the body is
-read (also with no credentials).
+read (also with no credentials). A body the server cannot parse at all (for example JSON nested thousands deep): **400**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE (TRUNCATE and a superuser are not stopped). The application never rewrites an
