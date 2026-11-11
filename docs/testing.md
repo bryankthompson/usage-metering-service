@@ -73,8 +73,8 @@ These were attacked and held; the test stays because the failure would be silent
 ## 5. What the suite does not cover
 
 - A live burst and a real Postgres restart: only `scripts/flood.py` and `scripts/outage-check.sh`, by hand. Restart policy
-  was checked by hand once: stopping postgres inside the db container restarts it (about 9 s to healthy); `docker stop`
-  and `docker kill` count as manual stops and are not restarted.
+  was checked by hand: stopping postgres inside the db container restarts it (3 to 4 s to healthy in seven runs); `docker stop`
+  and `docker kill` count as manual stops and are not restarted (both left the container exited after 12 and 15 s).
 - Multi-process concurrency: the race tests use threads in one process. Two rollup processes at once were not run.
 - Stripe: signatures are made locally with a fake secret; no call to Stripe, no real platform call, test mode only.
 - Body size on `/v1/usage` for an admitted tenant (the webhook route has a cap) and load beyond the flood's 600 requests.
