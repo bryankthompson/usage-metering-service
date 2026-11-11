@@ -10,7 +10,7 @@ charge for a past hour is rated with the price that applied then.
 import logging
 import re
 from bisect import bisect_right
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import psycopg
@@ -164,6 +164,28 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
     return lines, total
 
 
+MAX_RANGE = timedelta(days=366)           # a wider range loads every hourly row at once: eight such calls took the API to 1.7 GiB
+UNCLOSED_LIMIT = 100
+
+# Hours that start inside the range and hold usage that is not late, but are not in closed_hours: usage the bill does not
+# contain yet (the hour is still open, or the rollup is behind or stuck on it). Late events never close an hour, so not counted.
+UNCLOSED_HOURS = """
+SELECT hour_start FROM (
+    SELECT DISTINCT date_trunc('hour', occurred_at, 'UTC') AS hour_start FROM usage_events
+    WHERE tenant_id = %(tenant)s AND NOT late AND occurred_at >= %(start)s AND occurred_at < %(end)s + interval '1 hour'
+) h
+WHERE hour_start >= %(start)s AND hour_start < %(end)s
+  AND NOT EXISTS (SELECT 1 FROM closed_hours c WHERE c.hour_start = h.hour_start)
+ORDER BY hour_start LIMIT %(limit)s
+"""
+
+
+def unclosed_hours(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime) -> list[datetime]:
+    """The earliest UNCLOSED_LIMIT hours in [start, end) that hold usage the charges do not include yet."""
+    rows = conn.execute(UNCLOSED_HOURS, {"tenant": tenant_id, "start": start, "end": end, "limit": UNCLOSED_LIMIT})
+    return [r["hour_start"] for r in rows.fetchall()]
+
+
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -189,9 +211,17 @@ def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime,
             raise HTTPException(status_code=422, detail=f"{name} must be timezone-aware")
     if start >= end:
         raise HTTPException(status_code=422, detail="start must be before end")
+    if end - start > MAX_RANGE:
+        raise HTTPException(status_code=422, detail=f"the range is wider than {MAX_RANGE.days} days: ask for the period in pieces")
+    # Read before the rows: an hour that closes in between is then listed AND billed (the safe direction), never neither.
+    unclosed = unclosed_hours(conn, tenant_id, start, end)
     try:
         lines, total = charge_lines(conn, tenant_id, start, end)
     except NoPrice as err:
         log.error("charges refused: %s", err)
         raise HTTPException(status_code=409, detail=str(err)) from err
-    return {"tenant_id": tenant_id, "start": start, "end": end, "lines": lines, "total_micros": total}
+    if unclosed:
+        log.info("charges partial: tenant=%r %d hour(s) with usage are not closed yet, first %s", tenant_id, len(unclosed),
+                 unclosed[0].isoformat())
+    return {"tenant_id": tenant_id, "start": start, "end": end, "lines": lines, "total_micros": total,
+            "unclosed_hours": unclosed}
