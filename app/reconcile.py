@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"reconcile: {e}", file=sys.stderr)
         return 2
 
-    conn = db.connect()
+    conn = db.connect(statement_timeout_ms=0)
     try:
         conn.read_only = True
         print(f"reconcile: hour={args.hour or 'all closed'} since={args.since or '-'} actuals={args.actuals or '-'} tolerance_bps={args.tolerance_bps}", file=sys.stderr, flush=True)

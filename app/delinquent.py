@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--at", type=_aware_iso, metavar="ISO", help="evaluate at this time (with a zone) instead of now")
     args = parser.parse_args(argv)
     at = args.at or edge.now()
-    conn = db.connect()
+    conn = db.connect(statement_timeout_ms=0)
     try:
         rows = report(conn, at)
     finally:
