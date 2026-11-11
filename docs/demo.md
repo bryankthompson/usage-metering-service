@@ -21,9 +21,15 @@ charges JSON with `"total_micros": 6000`, then `demo ok`. Any unexpected status 
 expected X, got Y` with the body and exits non-zero.
 
 ## The database
+The data lives in a named volume, `pgdata` (`docker volume ls` shows it as `<project>_pgdata`; the project is the directory
+name or `COMPOSE_PROJECT_NAME`), mounted at `/var/lib/postgresql/data`. `docker compose down` and a recreated container keep it, so
+prices, usage and entitlements survive; `docker compose down -v` deletes it and resets the database.
 The schema is created by mounting `./db` into the db container's `/docker-entrypoint-initdb.d`. Postgres runs
 those files only when the data volume is first created: an existing volume is NOT re-initialised.
-`docker compose down -v` deletes the volume and resets it.
+A stack started before the named volume existed kept its data in an anonymous volume that the compose file no longer mounts: that
+volume stays on disk (`docker volume ls`) and the new database starts empty. To keep the data, on the old stack run
+`docker compose exec -T db pg_dump -U metering --data-only metering > data.sql` and `docker compose down`; switch to the new
+file; then `docker compose up -d db`, `docker compose exec -T db psql -U metering -d metering < data.sql` and `docker compose up -d`.
 If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept and
 not repaired: the demo then fails in its first steps (`relation ... does not exist`, or `FAIL step 3: expected 200,
 got 500`) and the rollup container restarts in a loop. Run `docker compose down -v` (it deletes the demo data) and
