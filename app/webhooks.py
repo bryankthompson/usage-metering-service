@@ -12,7 +12,7 @@ import psycopg
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from app.db import connect
+from app.db import connect, limit_lock_wait
 
 log = logging.getLogger(__name__)
 
@@ -199,6 +199,7 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
     if handler is None:
         log.info("webhook ignored: event=%r type=%r is not handled", event["id"], event["type"])
         return "ignored"
+    limit_lock_wait(conn)      # a held tenant or row lock is a 503 (Stripe retries) after db.LOCK_WAIT, not a pinned thread
     inserted = conn.execute(
         "INSERT INTO stripe_events (event_id, type) VALUES (%s, %s) ON CONFLICT (event_id) DO NOTHING RETURNING event_id",
         (event["id"], event["type"])).fetchone()

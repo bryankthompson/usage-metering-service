@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
         Nothing the handler did is committed: a connection that fails mid-request has rolled back.
         """
         log.error("database unavailable: %s %s: %s", request.method, request.url.path, exc)
-        return JSONResponse(status_code=503, content={"detail": "database unavailable"})
+        return JSONResponse(status_code=503, content={"detail": "database unavailable"}, headers={"Retry-After": "1"})
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

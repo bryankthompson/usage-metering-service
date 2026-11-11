@@ -110,7 +110,7 @@ class UsageEvent(BaseModel):
 
 def _unavailable(err: psycopg.OperationalError) -> HTTPException:
     log.error("usage unavailable: %s", err)
-    return HTTPException(status_code=503, detail="database unavailable")
+    return HTTPException(status_code=503, detail="database unavailable", headers={"Retry-After": "1"})
 
 
 @router.post("/v1/usage", status_code=201)
@@ -133,6 +133,7 @@ def ingest_usage(
 
 def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Connection) -> dict[str, str | int | bool]:
     params = event.model_dump()
+    db.limit_lock_wait(conn)        # a held hour lock is a 503 after db.LOCK_WAIT, not a pinned worker thread
     # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
     # insert that arrives while the hour is closing waits for the close and then sees it as closed.
     lock_hour_shared(conn, event.occurred_at)
