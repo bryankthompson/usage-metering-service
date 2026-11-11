@@ -18,8 +18,8 @@ tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **
 read (also with no credentials). A body the server cannot parse at all (for example JSON nested thousands deep): **400**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
-every row UPDATE and DELETE (TRUNCATE and a superuser are not stopped). The application never rewrites an
-accepted event.
+every row UPDATE and DELETE (it does not stop TRUNCATE, or the table owner or a superuser, who can disable the trigger).
+The application never rewrites an accepted event.
 
 **3. Hourly rollups.** `app/rollup.py` sums one UTC hour of events per tenant and model into
 `usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`
@@ -99,6 +99,8 @@ hand-written fixtures, the real app and a local stand-in server. No call to the 
 | GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503; no edge check, the signature is the check |
 
+Any route: **404** for an unknown path and **405** for a wrong method.
+
 ## Run it
 
 ```bash
@@ -161,15 +163,16 @@ in as lanes, each a branch with its own worktree: reconcile, the delinquent repo
 notes, the code tour, the runbook, the testing guide, the hardening fixes and four red-team reviews.
 
 **Gates.** A lane merged only when its branch contained the latest `main` with the tests run on that code, an
-independent review desk (DRC) had reviewed that exact head, and the CI check `test` was green. The cockpit's merge
-command refuses without the review receipt for that head, a head that contains the latest `main`, and green CI; when the
-reviewer left a finding owed, it also wants the lead's written note on it. Each merge moved `main` and made the next
-branch stale, so the lead merged `main` into each waiting branch, re-ran the tests and merged one lane at a time, each
-as its own pull request (`git log --first-parent --merges` lists them).
+independent review desk (DRC) had reviewed it, and the CI check `test` was green. The cockpit's merge
+command refuses without a review receipt for the branch, a head that contains the latest `main`, and green CI; commits
+added after the review (a merge of `main`, a small fix) and any finding left owed need the lead's written note. Each merge moved `main` and made the next
+branch stale, so the lead rebased the early lanes and merged `main` into the later ones, re-ran the tests and merged one
+lane at a time, each as its own pull request (`git log --first-parent --merges` lists them).
 
-**Hardening.** Twice the lead ran adversarial agents: four read-only red-team lanes (money, concurrency, security,
+**Hardening.** The lead ran adversarial agents in rounds: four read-only red-team lanes (money, concurrency, security,
 operations), each told to break the code on its own lens and to count a finding only with a command or a failing test
-that shows it. Round one found 0 blockers, 9 major and 10 minor. Seven of the majors changed code: a bill that names
+that shows it; a second round of the same four; a narrow third pass on one fix; and a fifth lane that checked every
+sentence of the README and docs against the code from a clean clone. Round one found 0 blockers, 9 major and 10 minor. Seven of the majors changed code: a bill that names
 every unpriced model, a same-second event that could undo a cancel, a held lock and a paused database that hung the whole
 API (now a 503), a request body buffered before the 401 (now capped), and one poisoned rollup hour that blocked every
 later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
@@ -197,7 +200,7 @@ in this repository.
   lane did not contain; dev A force-pushed over a merge commit of the lead's, reported eight clean starts of a compose
   change where the true count was seven, and pasted demo output from before its last commit (the lead re-ran the demo
   itself); dev B started throwaway database containers on volumes of live test databases while looking for its own
-  (it reported this itself; reads afterwards found no damage).
+  (it reported this itself; reads afterwards found no damage; [docs/build-log.md](docs/build-log.md) records it at 19:29).
 
 **Where it hurt.** The review desk could not run the tests until a tracked `scripts/test` gave it a database; messages
 to one dev were silently held because the cockpit treats a checkout on a `lane/*` branch as a lane, which cannot read

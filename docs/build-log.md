@@ -1,8 +1,9 @@
 # Build log
 
-A factual record of how this repo was built by three Claude Code sessions, each in its own cockpit
-(a Zellij session with a lead tab, a review desk and a merge gate): one lead and two assistant devs.
-Entries are written when the event happens. Times are US Central, 2026-11-10 onward.
+A factual record of how this repo was built by Claude Code sessions, each in its own cockpit
+(a Zellij session with a lead tab, a review desk and a merge gate): one lead, two assistant devs, a standing advisor, the
+review desk (DRC) and short-lived lanes for single jobs. Entries are written when the event happens; an entry's time is
+when its episode began, and the merge times are in `git log --first-parent --merges`. Times are US Central, 2026-11-10 onward.
 
 ## Roles and rules
 
@@ -210,7 +211,33 @@ Entries are written when the event happens. Times are US Central, 2026-11-10 onw
   older main), and DRC refused it at intake. The lead merged main into the four waiting lanes and resent the job.
 - **19:12 to 19:23** Round two of the red-team: the four lenses re-ran their own repros against the fixed code and attacked
   the fixes. 0 blockers. Fixed from it: model and tenant names in the reconcile report (#23). Written down as limits and not
-  fixed: a charges range that cuts an hour, the 100-hour cap of `unclosed_hours` (no truncation flag), the shared clock for
-  invoice and subscription events (a cancel older than an applied payment failure is stale; bounded by the grace window), a
-  frozen database mid-query, the exclusive lock during a very large close. In progress when this was written: a named volume
-  for Postgres (the data was in an anonymous volume, so `docker compose down` then `up` started an empty database).
+  fixed: a charges range that cuts an hour, the 100-hour cap of `unclosed_hours` (no truncation flag), a frozen database
+  mid-query, the exclusive lock during a very large close. The shared clock for invoice and subscription events (a cancel
+  older than an applied payment failure was stale) was first written down as a limit and then fixed (see 19:40). Two of the three majors were then fixed in code: the
+  operations lens found that Postgres data was in an anonymous volume, so `docker compose down` then `up` started an empty
+  database (named volume, #25, 19:38); the concurrency lens found that a cancel older than an applied payment failure was
+  lost (see 19:40).
+- **19:29** Dev B disclosed a slip: while checking that an old Postgres volume survives, it had started throwaway database
+  containers on five Docker volumes that held a Postgres data directory, three of them volumes of live test databases, for
+  about five seconds each. Reads afterwards found no errors and the tables intact; the lead told it to touch only volumes its
+  own compose project created.
+- **19:24 to 20:14** Docs and the last code: the runbook re-run on a live stack with four new failure entries (#24, 19:29),
+  the named database volume (#25, 19:38; DRC folded a `--wait` into the migration step), the limits found in round two written
+  down (#26, 19:42), the fix for the lost cancel (#27, 19:52, DRC at high, 0 found), `/healthz` made `async def` (#28, 19:58),
+  the README (#29, 20:03) and a stranger's-read pass over the runbook, testing and demo pages (#30, 20:14).
+- **19:40** The standing advisor, asked whether to document or fix the lost cancel, said fix it: a stale cancel is recorded as
+  handled and never retried, and no second clock is needed, because a canceled subscription id is not reopened. A delete of
+  the stored subscription id now skips the stale check and the stored clock keeps the larger value; a delete of another
+  subscription id is still judged by the clock. Dev A wrote the tests first (2 of 6 fail on the previous code) and three
+  mutation checks. The advisor also said that `/healthz`, a plain function, shared the worker pool with the database routes,
+  which is why it stopped answering with 50 requests parked on a frozen database; dev B measured that the proposed TCP
+  keepalive options do not end the hang (a paused container keeps acknowledging probes) and wrote the measurement down.
+- **19:54** A third, narrow concurrency pass attacked the new delete rule: 0 blockers, 0 major, 2 minor (a plan-swap sequence
+  that cancels, which the one-subscription assumption already documents, and a re-subscribe made stale by the clock, which
+  fails closed).
+- **19:58 to 20:12** Two sessions that had not written the docs read them: dev A ran the shipped path from a clean clone
+  (compose up, demo, outage check, `down` then `up` keeps the data, `down -v` empties it, 588 tests) and dev B read the
+  runbook, testing guide and demo page as a stranger (7 steps that could not be followed, 5 places where two pages disagreed,
+  4 overclaims); both lists were applied. A fifth review lane then checked every sentence of the README and docs from a clean
+  clone: 0 major and 9 minor findings (stale citations, an old count, wording that differed between pages, a process
+  claim), all fixed or recorded here.
