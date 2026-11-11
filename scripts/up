@@ -6,6 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT=${STAND_IN_PORT:-8089}
+[[ " $* " != *" --stand-in-port"* ]] || { echo "FAIL: set the stand-in port with STAND_IN_PORT, not --stand-in-port"; exit 2; }
 API="http://localhost:${API_PORT:-8000}"
 declare -a NAMES SECS
 ms() { echo $(( ${EPOCHREALTIME/./} / 1000 )); }   # milliseconds, no bc needed

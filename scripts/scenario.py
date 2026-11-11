@@ -140,7 +140,7 @@ def paint(text: str, code: str) -> str:
 
 
 def play(args) -> int:
-    api = f"http://localhost:{os.environ.get('API_PORT', '8000')}"
+    api = f"http://localhost:{os.environ.get('API_PORT') or '8000'}"
     if args.live:
         key = os.environ.get("SEEKR_API_KEY")
         if not key:

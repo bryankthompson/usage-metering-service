@@ -59,6 +59,8 @@ def make_server(port: int, seed: int) -> ThreadingHTTPServer:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             except ValueError:
                 return self.send_error(400, "body is not JSON")
+            if not isinstance(body, dict):
+                return self.send_error(400, "body is not a JSON object")
             if self.path == CHAT:
                 payload = replies.chat(str(body.get("model", "stand-in-model")))
             elif self.path == EMBEDDINGS:
@@ -83,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8089)
     parser.add_argument("--seed", type=int, default=1)
     args = parser.parse_args(argv)
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be 0..65535")
     try:
         server = make_server(args.port, args.seed)
     except OSError as err:
