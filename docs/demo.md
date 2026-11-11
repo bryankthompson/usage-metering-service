@@ -11,7 +11,7 @@
    (3000 in and 500 out: (3000*1500 + 500*3000) / 1000).
 
 ## Run
-Needs on the host: docker compose v2 (`docker compose`, `up --wait`), python3 and curl (the script signs the webhook with python3).
+Needs on the host: docker compose v2 (`docker compose`; `up --wait` for the restore recipe below), python3 and curl (the script signs the webhook with python3).
 Free ports: 8000 and 5432, or set `API_PORT` and `DB_PORT`.
 
     docker compose up -d --build
