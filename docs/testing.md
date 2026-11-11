@@ -75,6 +75,9 @@ These were attacked and held; the test stays because the failure would be silent
 - A live burst and a real Postgres restart: only `scripts/flood.py` and `scripts/outage-check.sh`, by hand. Restart policy
   was checked by hand: stopping postgres inside the db container restarts it (3 to 4 s to healthy in seven runs); `docker stop`
   and `docker kill` count as manual stops and are not restarted (both left the container exited after 12 and 15 s).
+- A frozen database (`docker pause db`) with requests in flight, by hand: `/healthz` answered in 2 ms at 3 to 65 s of an 80 s freeze
+  (no answer in 3 s on main); the parked requests answered 503 within 4 s of the unpause; TCP keepalive options did not end the wait
+  (`docs/ingest.md`). The suite holds an advisory lock instead of freezing the server (`tests/test_lock_timeout.py`).
 - Data kept across `docker compose down` and `up` (the named volume `pgdata`): checked by hand, not in `scripts/test`. After
   `down` without `-v` and after `up -d --force-recreate db`, a seeded price, entitlement and events were still there; `down -v`
   gave an empty database with the tables recreated from `db/*.sql`.

@@ -195,7 +195,8 @@ with the same numbers and `closed hour=...` prints:
 Two different 503s. `{"detail":"entitlement check unavailable"}` (no `Retry-After`) comes from the edge: the API cannot read the
 database. The log says why: `edge cannot read entitlements: failed to resolve host 'db'` (db stopped) or `... connection timeout
 expired` (db not answering; a new connection gives up after 5 s, measured with a paused db). Start or fix the db; the API needs
-no restart, and `/healthz` keeps answering 200 meanwhile, so it does not tell you the db is up.
+no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
+database, so it does not tell you the db is up.
 `{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s, a statement over
 15 s (`app/db.py`; not run here), or the db dying mid-request. Nothing of the failed attempt was stored, so the same request can be
 resent. A held lock shows in the log and in the database (the usage request waited 2.02 s):
@@ -209,6 +210,13 @@ and ingest into the same hour waits for it: wait for the close, or look at `dock
 session (`SELECT pg_terminate_backend(pid)`) rolls its transaction back; a close ended that way leaves the hour open and the next
 run closes it with the same numbers (`tests/test_attack_ingest.py`; not run here). The 503s for a missing webhook secret or grace
 setting have no `Retry-After` either (by reading `app/webhooks.py`).
+
+**No answer at all** (clients time out, no 503) while `/healthz` is 200: the database may be frozen, not stopped.
+`docker compose ps -a db` then shows `Up ... (Paused)` (run). Each request already inside the database waits for a server
+that is not running, so no timeout fires, and 40 of them take every worker thread; a new request that needs a thread waits too.
+Keepalive options do not end it (measured, `docs/ingest.md`). Fix: `docker compose unpause db`; the parked requests answer 503
+within seconds and can be resent. Or `docker compose restart api` (about 5 s): the parked requests are dropped, and new ones get
+503 `entitlement check unavailable` after 5 s until the db is back. Both measured with a paused db and 50 requests in flight.
 
 ## 12. 413 on /v1/usage
     curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @body.json | sed -n '1p;$p'
@@ -232,6 +240,7 @@ the wrong thing or a batch: look at the client, not the service. The access line
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
 | 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s, a statement over 15 s, or the db dying | 11 |
+| No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |
 | `reconcile` exits 1 | drift (rollup table changed outside `app.rollup`, or the other source differs), or `--fail-on-unbilled` | 4 |

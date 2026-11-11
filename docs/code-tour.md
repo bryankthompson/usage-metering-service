@@ -3,7 +3,7 @@
 For a reader who has written Python for about a year. Each item says what the feature is, where it is used here, and what
 would break without it. Line numbers are for the tree this was written on; `grep -n` the quoted text if they have moved.
 
-## 1. A decorator: `@app.get("/healthz")` (`app/main.py:48`)
+## 1. A decorator: `@app.get("/healthz")` (`app/main.py:49`)
 A decorator is a function that takes the function written under it and registers or wraps it. This one tells FastAPI
 "answer GET /healthz by calling `healthz`", and gives the function back unchanged.
 Without it, `healthz` is an ordinary function nobody calls, and `GET /healthz` answers 404.
@@ -36,4 +36,4 @@ Without the star, the tuple is `(hour, (rows, events))`. The loop at `app/rollup
 would then raise `ValueError: not enough values to unpack (expected 3, got 2)`.
 The same idea with two stars merges dicts: `{"a": f, **{name: g for name in names}}` in `app/webhooks.py:189`.
 
-Also worth reading: `app/bodylimit.py`, a small ASGI middleware (a class with `__call__` that wraps the app, added at `app/main.py:36`) that answers 413 for a `/v1/usage` body over 64 KiB before FastAPI reads it.
+Also worth reading: `app/bodylimit.py`, a small ASGI middleware (a class with `__call__` that wraps the app, added at `app/main.py:37`) that answers 413 for a `/v1/usage` body over 64 KiB before FastAPI reads it.

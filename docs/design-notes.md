@@ -33,10 +33,10 @@ Failure added: the second write can fail after the first commits, so it needs it
 **Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
 `restart: unless-stopped` (`compose.yaml:13-18`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
 (`compose.yaml:20-32`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:34-42`).
-Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:46-48`). The API answers 503 on
-every route when the database is unreachable (`app/main.py:36-44`) and 413 to a webhook body over 1 MiB
+Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:49-55`). The API answers 503 on
+every route when the database is unreachable (`app/main.py:39-47`) and 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
-`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:16-30`). A cluster would add liveness and readiness probes
+`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:17-31`). A cluster would add liveness and readiness probes
 on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and
 secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in the file. No manifests are written and none are tested.
 
@@ -61,7 +61,7 @@ provider today (`README.md`, "Not built").
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
 | Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`app/webhooks.py:22-23,125-126`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
 | Prices as immutable versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`db/002_billing.sql:14-23`). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
-| The edge reads the entitlement on its own connection | A database that is down fails at the edge as 503 and never lets the request through (`app/edge.py:38-40,52-57`); a handler in `app/main.py:36-44` now also answers 503 for a database that dies after the edge check. | One extra connection per request. |
+| The edge reads the entitlement on its own connection | A database that is down fails at the edge as 503 and never lets the request through (`app/edge.py:38-40,52-57`); a handler in `app/main.py:39-47` now also answers 503 for a database that dies after the edge check. | One extra connection per request. |
 | Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
 
 ## 4. A day against a week

@@ -89,17 +89,29 @@ holds the shared hour lock would block that hour's close for as long as it stays
 `test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight`), and no `idle_in_transaction_session_timeout` is set.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
-so a database that stops accepting connections, or answers slowly, is a 503 and `/healthz` keeps answering.
+so a database that stops accepting connections, or answers slowly, is a 503. `/healthz` is an `async` route that touches
+nothing, so it keeps answering while every worker thread is busy; it shows that the process is up and its event loop
+answers, not that the database does.
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the
 statement timeout is enforced by the server and the client has no timer of its own; the settings query right after
 connecting is likewise not bounded (found by review, not fixed).
 Measured on a frozen server (`docker pause`) after a connection was open: a request waiting inside a query got no answer in
-30 s, and with 50 requests in flight even `/healthz` stopped answering until the container was unpaused (red team,
-RT-operations-9); a plain `SELECT 1` on an already-open connection was still blocked after 22 s, past the 15 s statement
-timeout (run). A server-side timeout cannot fire on a server that is not running, and `db.connect` passes only
-`connect_timeout`, so no TCP keepalive and no `tcp_user_timeout` is set on the client connection. The red team's proposed
-fix, not built and not tried here: `keepalives=1 keepalives_idle=5 keepalives_interval=2 keepalives_count=3
-tcp_user_timeout=15000` in the connection string. Not tried against a paused process (only a paused container).
+30 s (red team, RT-operations-9), and a plain `SELECT 1` on an already-open connection was still blocked after 22 s, past the
+15 s statement timeout (run). `/healthz` used to stop answering with 50 requests in flight because it shared the worker pool;
+since it is `async` it does not (live, db paused with 50 requests parked: no answer in 3 s before, 200 in 2 ms after).
+**TCP keepalive does not end the wait (run).** The red team's proposed options, `keepalives=1 keepalives_idle=5
+keepalives_interval=2 keepalives_count=3 tcp_user_timeout=15000` in `DATABASE_URL` (psycopg reported `tcp_user_timeout` 15000 on
+the connection), left 50 requests parked in a lock wait on a paused db still waiting at 16, 30, 45 and 65 s of an 80 s
+freeze. The kernel of a frozen container keeps acknowledging and answering probes, so the options help only against a dead host
+or a cut network. They are not set. (My requests were in a lock wait, not a running query; the red team's run with a query
+hung the same way.)
+**While frozen:** each parked request holds a worker thread; 40 of them fill the pool, and then a new request that needs a
+thread gets no answer (nothing in 20 s, run) while `/healthz` answers. With only a few parked, a new request is a 503
+`entitlement check unavailable` after 5 s (log `edge cannot read entitlements: connection timeout expired`; run on POST
+`/v1/usage` and charges).
+**Recovery:** `docker compose unpause db`: all 50 parked requests answered 503 within 4 s (the server's timers fire on
+resume; a refused request stores nothing, so resend). Or `docker compose restart api` (healthz back in about 5 s): the parked
+requests are dropped with no answer (the client sees a closed connection) and new ones get a 503 after 5 s until the db is back.
 For `rollup --every` the rollup has no statement timeout (`statement_timeout_ms=0`). Run: a freeze that starts between two
 cycles ends the process, because the next connect gives up after 5 s (`ConnectionTimeout`, a traceback, exit 1; the compose
 `rollup` service has `restart: unless-stopped`). Not run: a freeze that starts while the rollup is inside a query; by the

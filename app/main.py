@@ -47,7 +47,11 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=503, content={"detail": "database unavailable"}, headers={"Retry-After": "1"})
 
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    async def healthz() -> dict[str, str]:
+        """Runs on the event loop, not in the thread pool the database routes share, so it answers while they are all parked.
+
+        It proves the process is up and its event loop answers; it does not touch the database and says nothing about it.
+        """
         return {"status": "ok"}
 
     app.include_router(ingest.router)
