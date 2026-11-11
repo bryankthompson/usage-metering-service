@@ -40,7 +40,7 @@ Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive d
 409 if a row has no price in force: the whole range is refused (no partial bill), and the detail names every unpriced model
 in the range, sorted, with the first hour of each (at most 20, then "and N more"), so all the missing prices can be added in
 one pass. The answer has one line per tenant, model and hour, and no cap on the number of lines is built: the red team
-asked for 366 days of 114 models (about 1M rows) and got a 114 MB body in 3.6 s (RT-operations-11, not repeated here).
+asked for 366 days of 114 models (about 1M rows) and got a 114 MB body in 3.6 s (RT-operations-11, in [docs/reviews/](reviews/README.md); not repeated here).
 Ask for narrower ranges. The route sits behind `require_entitlement`, so
 the edge can also answer 401, 402 or 503 as in the edge table below.
 

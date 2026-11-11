@@ -3,7 +3,7 @@
 Almost all of this code was written by AI coding sessions. This page says how the work was organised and what was done to
 find out whether it is right. It states what each check found and what it did not. Times are from `docs/build-log.md`
 (US Central, 2026-11-10); pull request numbers are from `git log --first-parent --merges`. Counts of review findings come
-from review reports that are kept outside this repo, so this page restates them (section 7).
+from the review reports in [docs/reviews/](reviews/README.md), kept as written; this page restates them.
 
 ## 1. The setup
 
@@ -67,6 +67,8 @@ Each layer fails in a different way from the others. One example each.
   was checked by a person reading the diff.
 
 ## 4. The review rounds
+
+Each round's report, and the commit it tested, is in [docs/reviews/](reviews/README.md).
 
 | Round | Lenses | Blocker | Major | Minor |
 |--|--|--|--|--|
@@ -141,7 +143,7 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - The platform adapter has not run against the real service. No key existed, so no call was made. It was tested
   against fixtures and a stand-in server only.
 - There is no load test beyond `scripts/flood.py` (600 requests from 150 clients), and a few one-off red-team measurements.
-- The review counts above live in reports kept outside the repo. The build log restates some, and its test counts are
-  from handoffs, not from the repo.
+- The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
+  they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
 - The merge gate's receipts are not stored in the repo (section 2).
 - No person is recorded as having read the whole diff.
