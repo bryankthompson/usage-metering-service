@@ -3,7 +3,8 @@
 Almost all of this code was written by AI coding sessions. This page says how the work was organised and what was done to
 find out whether it is right. It states what each check found and what it did not. Times are from `docs/build-log.md`
 (US Central, 2026-11-10); pull request numbers are from `git log --first-parent --merges`. Counts of review findings come
-from the review reports in [docs/reviews/](reviews/README.md), kept as written; this page restates them.
+from the review reports in [docs/reviews/](reviews/README.md), kept as written; this page restates them. Section 8 says
+what the person running the sessions decided.
 
 ## 1. The setup
 
@@ -59,6 +60,10 @@ Each layer fails in a different way from the others. One example each.
 - **A lane that checked the words against the code.** A fifth lens read every sentence of the README and docs from a clean
   clone: 0 major and 9 minor findings (stale citations, an old count, a process claim). A script, run by hand and not
   kept in the repo, then checked every citation (#32).
+- **Readers with no context.** Three agents with read-only tools, given only a clean copy of the final tree and told nothing
+  about who wrote it or why, described what they saw and tried to break the story (21:40). They found stale lines in the
+  testing guide, one route (charges) that still took its database connection the way ingest had stopped doing (#38), and
+  that the review evidence sat outside the repo, which the next change fixed (#39).
 - **A clean-clone run of the final code.** Dev A ran the shipped path from a clean clone at `e603a15` (start, demo,
   outage check, flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with
   `PGTZ=America/New_York`; 20:51). Dev B ran the suite from its own clean clone at the same commit and checked 40
@@ -121,6 +126,11 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - **A keepalive idea disproved by measurement (19:40).** TCP keepalive and `tcp_user_timeout` were proposed for a frozen
   database. Dev B measured that they do not end the wait, because a paused container keeps answering probes.
 
+- **A cleanup that ran after a refused merge (21:55).** The lead chained the branch cleanup after the merge command; the
+  merge was refused (CI still pending) and the cleanup deleted the branch of the open pull request #38, which closed it.
+  The branch was restored from the commit and the pull request reopened within a minute; nothing was lost. The cleanup now
+  runs only after the merge reports success.
+
 ## 6. Decisions not taken, with the reason
 
 - **Refusing back-dated price versions.** A correction is a legitimate use, so it is documented. Round 2 confirmed the
@@ -147,3 +157,26 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
   they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
 - The merge gate's receipts are not stored in the repo (section 2).
 - No person is recorded as having read the whole diff.
+
+## 8. What the operator decided
+
+The person running the sessions did not write or review the code, and this page does not claim they did. What they decided
+is below, each from their own words in the session, and each changed what was built.
+
+- **The job and the rules, before any code.** A small usage-metering and billing service, a prototype due the next
+  morning; money in integers; no real payment keys; nothing taken from an earlier coding test; the README may claim only
+  what the code does.
+- **How the work is checked.** Independent review and a green CI check on every merge, and the repo private while it was
+  built. The operator also said that the way the sessions work together is part of what the build is meant to show, so the
+  build log is kept as it happens.
+- **What the platform adapter may be.** It is named only in its own files, it runs on recorded responses because there was no
+  API key, and no live call is ever claimed (build log 17:20).
+- **The bar at the end (17:20).** The build should use the platform of the people it is for, have a way to be tested, be
+  robust, and be attacked by adversarial agents at the final review. That became the adapter, the testing guide and the red-team
+  lanes.
+- **Keeping the other sessions busy.** While the first lanes waited for review, the operator said the other leads could be
+  working, directed by the lead; that is why the work ran as many small parallel lanes.
+- **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
+  describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
+- **Still open at the time of writing.** The repo's name, whether it is public, and a read of the final head by the operator.
+  This page will not say the read happened until it has.

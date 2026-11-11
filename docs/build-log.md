@@ -263,3 +263,11 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 - **21:08 to 21:36** The operator said the interviewers may care how the code was built. Dev B wrote
   [how-it-was-built.md](how-it-was-built.md), checking each count and pull request number against git and the review
   reports; DRC checked it again and asked for this entry and the one above.
+- **21:36 to 22:05** Before publishing, the operator asked for agents with no context to read the repo and say what story it
+  tells. Three read-only agents (a README-only first look, a full read, a skeptic) read a clean copy of the final tree. They
+  recovered the design, the review process and the honest limits, but rated the process story weak because its evidence
+  (the review reports) was outside the repo, and they found stale lines in the testing guide, a docstring that contradicted
+  the pricing rule, a README sentence that overclaimed (a paused database), and one route (charges) that still opened its
+  connection in a dependency. Fixed: the charges connection (#38) and, in one docs change, the five review reports in
+  `docs/reviews/`, a "Start here" block, the stale lines and three limits written down (#39). A slip is recorded in
+  `docs/how-it-was-built.md` section 5 (21:55).
