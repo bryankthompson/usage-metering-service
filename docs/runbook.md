@@ -9,6 +9,7 @@ channel for this service: where a step says to ask, ask whoever runs it. Money i
     export BASE=http://localhost:8000 T=demo-1794359437      # T: the customer's tenant id (scripts/demo.sh prints its own on its step 1 line); BASE uses API_PORT
     psql() { docker compose exec -T db psql -U metering -d metering "$@"; }
 The tenant and the dates in the examples below (2026-11-10 and 11) come from one run: use your tenant and your UTC hours.
+These commands paste `$T` into a quoted SQL string, so a tenant id that contains a single quote is not supported here.
 
 ## 1. Pin the claim
 Write down: tenant `T`, period `[START, END)` in UTC (charges are per UTC hour), expected micros, billed micros (step 3).
@@ -152,8 +153,9 @@ adjustment feature: ask whoever runs this service for a manual credit, with the 
 ## 8. Webhooks and grace
     psql -c "SELECT event_id, type, received_at FROM stripe_events ORDER BY received_at"
     psql -c "SELECT tenant_id, status, stripe_customer_id AS customer, payment_failed_at, grace_until, last_event_at FROM entitlements ORDER BY tenant_id"
-A signed event is `processed` (state changed), `stale` (older than the last applied event for that tenant: ignored, but recorded; the one exception is a delete of the
-tenant's stored subscription, which is applied whatever its age),
+A signed event is `processed` (state changed), `stale` (older than the last applied event for that tenant: ignored, but
+recorded, with two exceptions: a delete of the tenant's stored subscription is applied whatever its age, and an older
+`invoice.payment_failed` for a `past_due` tenant with no grace window opens one),
 `duplicate` (event id already in `stripe_events`) or `ignored` (no tenant in the metadata, an unknown customer, an unhandled event
 type, or a failed payment for a `canceled` tenant). The HTTP answer is `{"status": ...}`. `processed` and `stale` leave a
 `stripe_events` row; a `duplicate` adds nothing and an `ignored` event is not recorded in the table, so read the outcome line
@@ -236,9 +238,11 @@ within seconds and can be resent. Or `docker compose restart api` (about 5 s): t
     python3 -c "print('x'*70000)" | curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @- | sed -n '1p;$p'
     HTTP/1.1 413 Request Entity Too Large
     {"detail":"request body too large"}
-`/v1/usage` refuses a body over 64 KiB (65,536 bytes is read as usual, 65,537 is a 413), before it reads the body and before any
-credential check, so a caller with no `X-Tenant-Id` gets 413 too. An event is a few hundred bytes, so a 413 is a client sending
-the wrong thing or a batch: look at the client, not the service. The access line is `"POST /v1/usage HTTP/1.1" 413` in
+`/v1/usage` refuses a body over 64 KiB (65,536 bytes is read as usual, 65,537 is a 413): it rejects an oversized
+`Content-Length` immediately, or counts streamed chunks and answers 413 as soon as they pass the cap, without buffering
+the rest. This happens before any credential check, so a caller with no `X-Tenant-Id` gets 413 too. An event is a few
+hundred bytes, so a 413 is a client sending the wrong thing or a batch: look at the client, not the service. The access
+line is `"POST /v1/usage HTTP/1.1" 413` in
 `docker compose logs api`. The webhook has its own limit (1 MiB, `webhook body too large`, step 8).
 
 ## Symptoms at a glance

@@ -17,11 +17,14 @@ job each, and four read-only red-team lanes. Every lane had its own session and 
 brief on paper that fixed which files it could touch (build log 17:30). Messages between sessions were treated as data
 to check, not as orders.
 
-## 2. The loop for every change
+## 2. The loop each lane was briefed to follow
+
+This is the loop each lane was asked to follow.
 
 1. Brief: what the lane builds, which files it may touch, what it must hand back.
 2. Branch: `dev/<name>` locally, pushed as `lane/<name>`.
-3. Test first, watched failing: the new test is run against the old code and must fail for the stated reason.
+3. Test first, watched failing: each lane was asked to run the new test against the old code and see it fail for the
+   stated reason.
 4. Mutation check: break the new rule by one line and see the guarding test turn red, then revert.
 5. The full suite (`scripts/test`, a real database, one per checkout) on the code as it will merge.
 6. DRC review of that exact head. The tier is `auto`, or `high` for guards, the entitlement path and large diffs
@@ -30,6 +33,13 @@ to check, not as orders.
 8. The merge gate. The merge command refuses without a review receipt for the branch, a head that contains the latest
    `main` and green CI. Commits added after the review, and any finding left owed, need the lead's written note.
 9. One pull request per change: `git log --first-parent --merges` lists every merged pull request.
+
+This is the loop each lane was briefed to follow, and most changes followed it, but not every one. The body-cap fix in
+`097e67e` came before its regression test in `b526f4d`. In `2b2bc7b` and `02e94c8`, a test and its fix landed in the same
+commit, so their order cannot be read from git; for `02e94c8`, the build log at 20:25 says the ten new tests failed on
+the old code.
+Other recorded exceptions include the daylight-saving fix folded without a test (section 3), the #21 fold with no test
+(section 3), and the `--every` check recorded at 15:46 in the build log, which had no test.
 
 The repo does not store the receipts. What it keeps is the merge commit of each pull request and the build log; for the
 review itself the gate rests on the rule above, not on a receipt you can open here.
@@ -63,10 +73,15 @@ Each layer fails in a different way from the others. One example each.
   about who wrote it or why, described what they saw and tried to break the story (21:40). They found stale lines in the
   testing guide, one route (charges) that still took its database connection the way ingest had stopped doing (#38), and
   that the review evidence sat outside the repo, which the next change fixed (#39).
-- **A clean-clone run of the final code.** Dev A ran the shipped path from a clean clone at `e603a15` (start, demo,
-  outage check, flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with
-  `PGTZ=America/New_York`; 20:51). Dev B ran the suite from its own clean clone at the same commit and checked 40
-  citations and every link. The commits after it change documentation only.
+- **Clean-clone runs.** Earlier, Dev A ran the shipped path from a clean clone at `e603a15` (start, demo, outage check,
+  flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with `PGTZ=America/New_York`; 20:51).
+  Dev B ran the suite from its own clean clone at the same commit and checked 40 citations and every link. Code changed
+  after those runs: #38 (`a583885`, `05eec07`) changed the charges connection and its test, and `6eacf22` changed a
+  docstring in `app/db.py`. The final-code run was the lead's: from a clean clone of `dea36c8`, 610 tests, the demo and
+  the outage check passed (the first demo call came before the API was listening; the rerun passed, as
+  `docs/demo.md` says). No code changed after `dea36c8`: `git diff dea36c8 main -- app tests scripts compose.yaml
+  Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
+  `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
 - **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
   was checked by a person reading the diff.
 
@@ -81,7 +96,7 @@ Each round's report, and the commit it tested, is in [docs/reviews/](reviews/REA
 | Round 3 (the new delete rule) | concurrency | 0 | 0 | 2 |
 | Claims, first pass (words against code) | claims | not counted | 0 | 9 |
 | Claims, re-check of the runbook, testing and demo pages | claims | not counted | 0 | 0 |
-| Claims, final check at `e603a15` | claims | not counted | 0 | 1 |
+| Claims, final check (before #38) at `e603a15` | claims | not counted | 0 | 1 |
 
 The reports also list notes, not counted here. The claims reports count major and minor only.
 
