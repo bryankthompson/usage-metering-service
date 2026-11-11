@@ -147,7 +147,8 @@ These are known and not fixed; see also the two assumptions above (one customer 
   per-tenant advisory lock and the row lock are what it relies on.
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
   database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
-  turn into 503; not tested under load.
+  turn into 503; not tested under load. The handler takes its connection itself, only once it holds a worker thread and after
+  the checks that need no database, so a refused charges request (403 or 422) opens none (`tests/test_charges_connection.py`).
 - **The session time zone is pinned to UTC on every connection** (`db.connect` sets it in the statement that sets the statement
   timeout), so `PGTZ`, a URL option or the server's setting cannot change the hours the app prints or reads back. The whole suite
   passes under `PGTZ=America/New_York` (601 of 601 at 02e94c8). A connection opened by hand (`psql`) keeps its own zone.

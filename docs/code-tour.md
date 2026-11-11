@@ -20,7 +20,7 @@ burst of requests can use up Postgres's connection slots. `app/ingest.py:128`, i
 `tenant: str = Depends(require_entitlement)` tells FastAPI "before calling this handler, call `require_entitlement`, and pass
 me what it returns as `tenant`". If that function raises an `HTTPException` (401, 402 or 503 here), the handler never runs.
 Without `Depends`, `tenant` becomes a plain query parameter the caller types in. Anyone could name any tenant, and
-nothing would check the entitlement. `get_charges` (`app/pricing.py:205`) and `stripe_webhook` (`app/webhooks.py:229`, `Depends(raw_body)`) use it too.
+nothing would check the entitlement. `get_charges` (`app/pricing.py:206`) and `stripe_webhook` (`app/webhooks.py:229`, `Depends(raw_body)`) use it too.
 
 ## 4. `raise ... from` (`app/edge.py:57`)
 `raise _deny(503, ...) from err` raises a new exception while recording the old one (`err`, the database error) as its
