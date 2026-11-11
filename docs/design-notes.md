@@ -34,7 +34,8 @@ Failure added: the second write can fail after the first commits, so it needs it
 `restart: unless-stopped` (`compose.yaml:15-20`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
 (`compose.yaml:22-34`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:36-44`).
 Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:49-55`). The API answers 503 on
-every route when the database is unreachable (`app/main.py:39-47`) and 413 to a webhook body over 1 MiB
+every route that uses the database when it is unreachable; `/healthz` does not touch it and keeps answering 200
+(`app/main.py:39-47,49-55`). It also answers 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
 `LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:17-30`). A cluster would add liveness and readiness probes
 on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and
@@ -56,7 +57,7 @@ provider today (`README.md`, "Not built").
 | Decision | Why | Cost |
 |--|--|--|
 | Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`hour_index` and the exclusive lock in `close_hour`, `app/rollup.py:49-51,74-78`; the shared lock in `_store`, `app/ingest.py:139-141`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
-| Late events flagged and never billed, instead of reopening a closed hour | A closed hour never changes, so a bill already produced stays true (`docs/ingest.md`, "Late events"). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
+| Late events flagged and never billed, instead of reopening a closed hour | A closed hour's usage never changes, so the same price versions give the same bill. A price version back-dated into a closed hour changes a recomputed charge (`docs/billing.md`). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
 | Grace counted from the first failure that arrives | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). It is Stripe's first failure only when delivery order equals creation order. |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
 | Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py:22-23,137-139`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |

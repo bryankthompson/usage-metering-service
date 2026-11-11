@@ -19,8 +19,10 @@ One `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` does the de
 requests at the same instant store one event. New event: **201** `accepted`. Resend with the same key and
 payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
 different payload: **409**. Body `tenant_id` is not the
-tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**, answered before the body is
-read (also with no credentials). A body the server cannot parse at all (for example JSON nested thousands deep): **400**.
+tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**: an oversized
+`Content-Length` is rejected immediately; otherwise streamed chunks are counted and the request is rejected as soon as
+they pass the cap, without buffering the rest (also with no credentials). A body the server cannot parse at all (for
+example JSON nested thousands deep): **400**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the

@@ -55,10 +55,12 @@ No admin API: prices are added through `add_price_version`. Nothing is sent to S
 `POST /v1/stripe/webhook` checks `Stripe-Signature` on the raw body (`stripe.Webhook.construct_event`, secret
 `STRIPE_WEBHOOK_SECRET`) before it touches the database. No secret set (or a blank one): 503. A body over 1 MiB: 413
 (it is read before the signature can be checked, so it is capped). Missing or bad signature, a timestamp older than
-5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is 503 on every route, not 500, with
-`Retry-After: 1`. So is a wait of more than 2 seconds (`db.LOCK_WAIT`) for a held lock, such as the tenant's advisory lock or
-its entitlement row: the event is not recorded and Stripe's retry applies it. The rollup (closing) side never times out. The tenant is `subscription.metadata.tenant_id` (the row is
-created or updated) or, for invoices, the `entitlements` row with that `stripe_customer_id`. No tenant found: 200
+5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is
+503 on every route that uses the database, not 500, with `Retry-After: 1`. So is a wait of more than 2 seconds
+(`db.LOCK_WAIT`) for a held lock, such as the tenant's advisory lock or its entitlement row: the event is not recorded
+and Stripe's retry applies it. The rollup (closing) side never times out. `/healthz` does not touch the database and keeps
+answering 200. The tenant is `subscription.metadata.tenant_id` (the row is created or updated) or, for invoices, the
+`entitlements` row with that `stripe_customer_id`. No tenant found: 200
 `{"status": "ignored"}`, logged, not recorded. Other event types are ignored the same way, and so is a subscription
 whose `tenant_id` is not usable text: over 200 characters (the limit `/v1/usage` has), a control character or a lone
 surrogate in it, or a space or tab at either end (the edge trims the header, so such a tenant could never match),
@@ -79,7 +81,7 @@ subscription event clears the window; the next failure starts a new one. `invoic
 
 Each event id is recorded in `stripe_events` in the same transaction as the change; a redelivery is 200 `duplicate`.
 An event older than `last_event_at` does not overwrite newer state (200 `stale`); the clock is shared by invoice and
-subscription events. The exception is a `customer.subscription.deleted` whose subscription id equals the one stored on the
+subscription events. One exception is a `customer.subscription.deleted` whose subscription id equals the one stored on the
 tenant: it is terminal, so it is applied whatever `last_event_at` says (a payment failure created after the cancel and applied
 first does not hide it), and `last_event_at` keeps the larger value. A delete of another id, or for a tenant with no stored id,
 is judged by the clock (see "Assumptions and limits"). Events with the same `created` second
@@ -90,7 +92,7 @@ second cannot reactivate the tenant; only a strictly newer subscription event do
 applies, and so does a tie in any other state. An `invoice.payment_failed` of the cancel's second does not reopen the
 tenant either (a failure never does). Cost: a genuinely new subscription created in the same second as the old one's cancel
 (a plan swap done as delete plus create) stays denied until a strictly newer subscription event arrives: it fails closed.
-One exception to `stale`: an older failure for a `past_due` tenant that has no window opens one, counted from that
+The other exception to `stale`: an older failure for a `past_due` tenant that has no window opens one, counted from that
 failure's own time (200 `processed`, `last_event_at` unchanged). It can be shorter than a fresh window if the old
 failure belongs to an earlier, cured delinquency, and with failures delivered out of order by more than the retry
 spacing it can be later than Stripe's first failure. A later older failure does not move an existing window.
