@@ -11,6 +11,8 @@
    (3000 in and 500 out: (3000*1500 + 500*3000) / 1000).
 
 ## Run
+Needs on the host: docker compose v2 (`docker compose`, `up --wait`), python3 and curl (the script signs the webhook with python3).
+Free ports: 8000 and 5432, or set `API_PORT` and `DB_PORT`.
 
     docker compose up -d --build
     scripts/demo.sh
@@ -19,6 +21,10 @@ Give the api a few seconds to start: `FAIL step 3: expected 200, got 000` means 
 The API port is `API_PORT` (default 8000); the api and db ports listen on 127.0.0.1 only. Expected last lines: the
 charges JSON with `"total_micros": 6000`, then `demo ok`. Any unexpected status or value prints `FAIL step N:
 expected X, got Y` with the body and exits non-zero.
+Two things in the output are not faults. Step 4 makes the api log two WARNING lines on purpose, the refusals it checks:
+`edge denied: tenant='nobody-...' status=402 reason=no entitlement` and `edge denied: tenant=None status=401 reason=X-Tenant-Id header
+is required`. And step 6 prints the rollup's own `closed hour=...` line right before the script's own `step 6: rollup -> closed hour=...`
+line, so the hour appears twice.
 
 ## The database
 The data lives in a named volume, `pgdata` (`docker volume ls` shows it as `<project>_pgdata`; the project is the directory

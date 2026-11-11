@@ -8,7 +8,7 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 
 | Layer | Command | Passes when | In CI |
 |--|--|--|--|
-| Tests, real Postgres 16 | `scripts/test` | the last line reads `N passed` (read N there; this file does not copy it) | yes: `uv run pytest -q` |
+| Tests, real Postgres 16 | `scripts/test` | the last line starts `N passed` (read N there; this file does not copy it; see the warning note below) | yes: `uv run pytest -q` |
 | One file | `scripts/test tests/test_attack_ingest.py` | same | (part of the above) |
 | End to end demo | `docker compose up -d --build`, then `scripts/demo.sh` | prints `demo ok` (price, signed webhook, usage, rollup, charges) | no |
 | Reconcile | `docker compose exec -T rollup python -m app.reconcile` | exit 0; 1 = drift, 2 = bad argument (docs/reconcile.md) | no |
@@ -16,7 +16,13 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 | Database outage | `scripts/outage-check.sh` | 503 while the db is stopped, 201 after, earlier row still there | no |
 
 `scripts/test` starts a throwaway Postgres container and gives each checkout its own database (or uses `DATABASE_URL`).
-The last three rows need a live `docker compose up`; `API_PORT` picks the port, `COMPOSE_PROJECT_NAME` the project.
+The last four rows need a live `docker compose up`; `API_PORT` and `DB_PORT` pick the ports, `COMPOSE_PROJECT_NAME` the project.
+Needs on the host: docker compose v2 (`docker compose`, `up --wait`), `uv`, python3 and curl. Free ports: 8000 and 5432 for the
+stack, 5455 for the tests, or set `API_PORT`, `DB_PORT`, `TEST_DB_PORT`.
+The test run ends `N passed, 1 warning`: a Starlette deprecation notice about the test client's use of `httpx` ("install `httpx2`
+instead"). It does not come from this code and is harmless.
+`scripts/test` prints a WARNING when an older shared `metering-test-db` publishes its port beyond 127.0.0.1 (it holds test data
+only). Run `docker rm -f metering-test-db` when no test run is in progress; the next `scripts/test` recreates it on 127.0.0.1.
 CI (`.github/workflows/ci.yml`) runs only the pytest line, on every pull request and push to `main`. The demo, flood and
 outage scripts are run by hand and are not in CI.
 
@@ -57,13 +63,13 @@ These were attacked and held; the test stays because the failure would be silent
 - A rollup sum past BIGINT raises, rolls back and leaves the hour open, as `docs/ingest.md` says.
 - Webhook signature tolerance at the edge of the window, concurrent delivery of one event id, grace boundaries, charges
   at every price boundary (`tests/test_attack_webhooks.py`, `tests/test_attack_billing.py`).
-- The demo twice on one stack (the second run picks the previous hour); `docker compose up` from nothing.
 
 ## 4. How a bug was proven
 
 - **Fails without the fix.** Check out the commit before a fix for the file, then run the new tests:
   `git checkout <fix-commit>^ -- app/ingest.py && scripts/test tests/test_attack_ingest.py`, then
-  `git checkout HEAD -- app/ingest.py`. The commit that added `scripts/flood.py` records its own result: on `app/ingest.py`
+  `git checkout HEAD -- app/ingest.py` (find a fix commit with `git log --oneline -- app/ingest.py`; the commit that added
+  `scripts/flood.py` with `git log --diff-filter=A --oneline -- scripts/flood.py`). The commit that added `scripts/flood.py` records its own result: on `app/ingest.py`
   as it was on `main` before the attack round it gave 159 x 500 and 10 x 503; with the fixes, 300 x 201 and 300 x 200.
 - **Mutation checks.** The two devs report one-line mutations (remove the hour lock, move the commit before the aggregate,
   flip a boundary comparison) that turned the guarding tests red. Those runs are in the handoffs, not in the repo; to
@@ -83,7 +89,10 @@ These were attacked and held; the test stays because the failure would be silent
   gave an empty database with the tables recreated from `db/*.sql`.
 - Multi-process concurrency: the race tests use threads in one process. Two rollup processes at once were not run.
 - Stripe: signatures are made locally with a fake secret; no call to Stripe, no real platform call, test mode only.
-- Body size on `/v1/usage` for an admitted tenant (the webhook route has a cap) and load beyond the flood's 600 requests.
+- Load beyond the flood's 600 requests. (The 64 KiB body cap on `/v1/usage` and the webhook's 1 MiB cap are tested:
+  `tests/test_usage_body_cap.py`.)
+- The demo twice on one stack (the second run picks the previous hour) and `docker compose up` from nothing: run by hand, not in
+  `scripts/test`.
 - Time: the edge clock is replaced in tests; nothing sleeps through a real grace period.
 
 | Known limit (found, not fixed) | Where it is written down |
