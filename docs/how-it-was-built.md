@@ -171,7 +171,7 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
   they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
 - The merge gate's receipts are not stored in the repo (section 2).
-- No person is recorded as having read the whole diff.
+- No person is recorded as having read the whole diff. The five functions the operator said they read are in section 8.
 
 ## 8. What the operator decided
 
@@ -193,6 +193,8 @@ is below, each from their own words in the session, and each changed what was bu
   working, directed by the lead; that is why the work ran as many small parallel lanes.
 - **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
   describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
-- **Still open at the time of writing.** The repo's name stays generic; it has been public since 2026-11-10. The
-  operator's read of the final head is still pending.
-  This page will not say the read happened until it has.
+- **The operator's read, and the one open item.** The operator said on 2026-11-11 that they read five functions as they stand
+  at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
+  `_in_force` and `_rate` (`app/pricing.py:80` and `:88`), `require_entitlement` (`app/edge.py:36`) and `_apply_subscription`
+  (`app/webhooks.py:105`). This page does not claim they read anything else, or wrote or reviewed the code. The repo's name
+  stays generic; it has been public since 2026-11-10.
