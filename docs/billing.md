@@ -148,10 +148,15 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
   database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
   turn into 503; not tested under load.
-- **The database session time zone is assumed to be UTC** (the compose default). Under `PGTZ=America/New_York`, 16 of 507
-  tests fail: most read a timestamp back and compare its local clock hour or ISO text, which is a test assumption. One real
-  effect: an event dated `0001-01-01T00:00:00Z` is a 500 on `/v1/usage` in a zone west of UTC, because the stored instant
-  cannot be shown as a Python datetime there. Billing itself is right in any zone (`test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then`).
+- **The database session time zone is assumed to be UTC** (the compose default). Under `PGTZ=America/New_York`, 26 of 591
+  tests fail at 82bc2df (the earlier count was 16 of 507: those 16 still fail, 10 more were added since). 13 are test
+  assumptions: they read a timestamp back and compare its local clock hour or ISO text. 13 show a real difference in what the
+  product prints, none in what it bills. `app.reconcile` prints the hour of a DRIFT line as the session zone's clock hour
+  followed by a literal `Z` (`hour=2026-11-10T05:00:00Z` for the hour starting 10:00Z): the drift and the exit code are right,
+  the named hour is not. The charges `hour_start`, the hours in the 409 text and `app.delinquent --json` give the right instant
+  with the zone's offset (`-05:00`) instead of `Z` or `+00:00`. A year-one timestamp is a 500 in a zone west of UTC: an event
+  dated `0001-01-01T00:00:00Z` on `/v1/usage`, and a price version with `effective_from` in year one on the charges path.
+  Billing itself is right in any zone (`test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then`). Not fixed here.
 - **`LOG_LEVEL` does not override a handler that is already installed.** `configure_logging` sets the level of the `app`
   logger, but a root handler with its own stricter level, installed before the app starts, still filters the lines. Under
   `docker compose` no such handler exists. Found in review, not fixed.
