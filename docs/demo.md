@@ -29,7 +29,7 @@ those files only when the data volume is first created: an existing volume is NO
 A stack started before the named volume existed kept its data in an anonymous volume that the compose file no longer mounts: that
 volume stays on disk (`docker volume ls`) and the new database starts empty. To keep the data, on the old stack run
 `docker compose exec -T db pg_dump -U metering --data-only metering > data.sql` and `docker compose down`; switch to the new
-file; then `docker compose up -d db`, `docker compose exec -T db psql -U metering -d metering < data.sql` and `docker compose up -d`.
+file; then `docker compose up -d --wait db` (waits for the healthcheck), `docker compose exec -T db psql -v ON_ERROR_STOP=1 -U metering -d metering < data.sql` and `docker compose up -d`.
 If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept and
 not repaired: the demo then fails in its first steps (`relation ... does not exist`, or `FAIL step 3: expected 200,
 got 500`) and the rollup container restarts in a loop. Run `docker compose down -v` (it deletes the demo data) and
