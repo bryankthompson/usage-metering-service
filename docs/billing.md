@@ -28,12 +28,17 @@ effective at 10:30 applies from the 11:00 hour). Each row is rounded on its own;
 Charges are computed when asked and no bill is stored: that is a choice (no snapshot), so the same range asked again
 after a back-dated `add_price_version` can return a different total. Keep your own invoices.
 Charges cover closed hours only. Usage in an hour that has not been rolled up yet (the current hour, and an ended hour for up
-to about 65 minutes: the 5-minute grace plus one run of the hourly rollup loop) is not in `total_micros`, and the response
-does not say so.
+to about 65 minutes: the 5-minute grace plus one run of the hourly rollup loop) is not in `total_micros`. The response says
+which hours those are: `unclosed_hours` lists the hours that start inside the range, hold usage that is not late and have no
+`closed_hours` row (the earliest 100, oldest first, the current hour included; `[]` when nothing is waiting). The total is
+complete only when the list is empty. This is also how a stuck rollup shows on the bill side: an older hour that stays in the
+list long after its 65 minutes is one the rollup cannot close (see the rollup log), and every later hour is billed without it.
 Model names are compared byte for byte: `GPT`, `gpt` and `GPT ` are three models, each needing its own price.
 Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes, a number instead of ISO text,
-or `start >= end`,
-409 if a row has no price in force (the response names the model). The route sits behind `require_entitlement`, so
+`start >= end`, or a range wider than 366 days (ask for the period in pieces: every row of the range is loaded at once),
+409 if a row has no price in force: the whole range is refused (no partial bill), and the detail names every unpriced model
+in the range, sorted, with the first hour of each (at most 20, then "and N more"), so all the missing prices can be added in
+one pass. The route sits behind `require_entitlement`, so
 the edge can also answer 401, 402 or 503 as in the edge table below.
 
 ## Tests
