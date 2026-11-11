@@ -29,14 +29,16 @@ HOUR_LOCK = ("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_inde
 @contextmanager
 def held(sql: str, params: tuple, release_after: float = 5.0):
     holder = db.connect()
-    holder.execute(sql, params)
-    safety = threading.Timer(release_after, holder.rollback)
-    safety.start()
     try:
-        yield holder
+        holder.execute(sql, params)
+        safety = threading.Timer(release_after, holder.rollback)
+        safety.start()
+        try:
+            yield holder
+        finally:
+            safety.cancel()
+            holder.rollback()
     finally:
-        safety.cancel()
-        holder.rollback()
         holder.close()
 
 

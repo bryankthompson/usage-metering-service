@@ -6,6 +6,7 @@ ASGI guard answers 413 from the Content-Length header without reading anything, 
 body that sends no (or a wrong) Content-Length, so memory stays near the cap. The webhook has its own cap (webhooks.raw_body).
 """
 from starlette.exceptions import HTTPException
+from starlette._utils import get_route_path
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -18,7 +19,7 @@ class BodyLimit:
         self.limits = limits                      # path -> largest body in bytes; any other path is not limited here
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        limit = self.limits.get(scope["path"]) if scope["type"] == "http" else None
+        limit = self.limits.get(get_route_path(scope)) if scope["type"] == "http" else None
         if limit is None:
             await self.app(scope, receive, send)
             return
