@@ -23,8 +23,13 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def in_grace(grace_until: datetime | None, at: datetime) -> bool:
+    """A past_due tenant is still allowed while `at` is no later than `grace_until`; no grace period means denied."""
+    return grace_until is not None and at <= grace_until
+
+
 def _deny(status_code: int, tenant_id: str | None, reason: str) -> HTTPException:
-    log.warning("edge denied: tenant=%s status=%s reason=%s", tenant_id, status_code, reason)
+    log.warning("edge denied: tenant=%r status=%s reason=%s", tenant_id, status_code, reason)
     return HTTPException(status_code=status_code, detail=reason)
 
 
@@ -34,7 +39,13 @@ def require_entitlement(request: Request) -> str:
     The entitlement is read on its own connection, so a database that is down fails here as 503 and
     never lets the request through.
     """
-    tenant_id = (request.headers.get("x-tenant-id") or "").strip()
+    tenant_id = request.headers.get("x-tenant-id") or ""
+    try:
+        # The server hands header bytes over as latin-1; clients send UTF-8, so a non-ASCII tenant id arrives garbled.
+        tenant_id = tenant_id.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        pass                                                    # not UTF-8: keep it as received, it just will not match
+    tenant_id = tenant_id.strip(" \t")                          # HTTP optional whitespace is a space or a tab, nothing else
     if not tenant_id:
         raise _deny(401, None, "X-Tenant-Id header is required")
     try:
@@ -48,6 +59,6 @@ def require_entitlement(request: Request) -> str:
         raise _deny(402, tenant_id, "no entitlement")
     if row["status"] == "active":
         return tenant_id
-    if row["status"] == "past_due" and row["grace_until"] is not None and now() <= row["grace_until"]:
+    if row["status"] == "past_due" and in_grace(row["grace_until"], now()):
         return tenant_id
     raise _deny(402, tenant_id, f"not entitled: status {row['status']}")

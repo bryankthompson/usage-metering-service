@@ -8,10 +8,15 @@ Prices are per model and versioned: a new price is a new row, a stored version i
 charge for a past hour is rated with the price that applied then.
 """
 import logging
-from datetime import datetime
+import re
+from bisect import bisect_right
+from datetime import datetime, timezone
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BeforeValidator
+from pydantic_core import PydanticCustomError
 
 from app.db import get_conn
 from app.edge import require_entitlement
@@ -30,21 +35,29 @@ def _require_aware(value: datetime, name: str) -> None:
         raise ValueError(f"{name} must be timezone-aware")
 
 
+def _require_int(value: object, name: str) -> None:
+    # PostgreSQL would round a float (1.5 becomes 2) and take True as 1: a price is never silently changed.
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an int of micro-USD, got {value!r}")
+
+
 def add_price_version(conn: psycopg.Connection, model: str, effective_from: datetime,
                       input_micros_per_1k: int, output_micros_per_1k: int) -> int:
     """Store the next version (1, 2, ...) for `model` and return its number. Commits.
 
     Two writers racing for the same number collide on the primary key and one raises; neither
-    overwrites the other.
+    overwrites the other. A price that is not an int (a float, a bool, a string) raises TypeError.
     """
     _require_aware(effective_from, "effective_from")
+    _require_int(input_micros_per_1k, "input_micros_per_1k")
+    _require_int(output_micros_per_1k, "output_micros_per_1k")
     row = conn.execute(
         "INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
         " SELECT %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s FROM price_versions WHERE model = %s"
         " RETURNING version",
         (model, effective_from, input_micros_per_1k, output_micros_per_1k, model)).fetchone()
     conn.commit()
-    log.info("price version added: model=%s version=%s effective_from=%s in=%s out=%s",
+    log.info("price version added: model=%r version=%s effective_from=%s in=%s out=%s",
              model, row["version"], effective_from.isoformat(), input_micros_per_1k, output_micros_per_1k)
     return row["version"]
 
@@ -62,6 +75,14 @@ def price_at(conn: psycopg.Connection, model: str, at: datetime) -> dict:
     if row is None:
         raise NoPrice(f"no price for model {model!r} at {at.isoformat()}")
     return row
+
+
+def _in_force(keys: list[datetime], versions: list[dict], at: datetime) -> dict | None:
+    """What `price_at` selects, from versions already loaded and sorted by (effective_from, version); `keys` are their
+    effective_from values. The last one at or before `at` wins, so a tie goes to the later version."""
+    # Same-zone aware datetimes compare by wall clock, which is wrong across a DST fallback: compare in UTC.
+    index = bisect_right(keys, at.astimezone(timezone.utc))
+    return versions[index - 1] if index else None
 
 
 def _rate(version: dict, tokens_in: int, tokens_out: int) -> int:
@@ -94,9 +115,22 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
         "SELECT model, hour_start, tokens_in, tokens_out FROM usage_rollups_hourly"
         " WHERE tenant_id = %s AND hour_start >= %s AND hour_start < %s ORDER BY hour_start, model",
         (tenant_id, start, end)).fetchall()
+    # One query for every version of the models in range, not one per row: a year of hourly rows is thousands.
+    models = sorted({row["model"] for row in rows})
+    loaded: dict[str, list[dict]] = {model: [] for model in models}
+    if models:
+        # A version effective after the last hour in range can never apply, so it is not loaded (nor decoded).
+        for v in conn.execute(
+                "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
+                " WHERE model = ANY(%s) AND effective_from <= %s ORDER BY effective_from, version",
+                (models, rows[-1]["hour_start"])):
+            loaded[v["model"]].append(v)
+    keys = {model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()}
     lines = []
     for row in rows:
-        version = price_at(conn, row["model"], row["hour_start"])
+        version = _in_force(keys[row["model"]], loaded[row["model"]], row["hour_start"])
+        if version is None:
+            raise NoPrice(f"no price for model {row['model']!r} at {row['hour_start'].isoformat()}")
         lines.append({
             "model": row["model"],
             "hour_start": row["hour_start"],
@@ -106,13 +140,27 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
             "micros": _rate(version, row["tokens_in"], row["tokens_out"]),
         })
     total = sum(line["micros"] for line in lines)
-    log.info("charges computed: tenant=%s start=%s end=%s lines=%d total_micros=%d",
+    log.info("charges computed: tenant=%r start=%s end=%s lines=%d total_micros=%d",
              tenant_id, start.isoformat(), end.isoformat(), len(lines), total)
     return lines, total
 
 
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _iso_text(value: object) -> object:
+    """Only ISO 8601 text: a bare number is read as Unix seconds by the datetime parser (`?start=5` is 1970), and a
+    caller who sends one almost certainly meant something else. Every spelling that starts YYYY-MM-DD passes unchanged."""
+    if not isinstance(value, str) or not ISO_DATE.match(value):
+        raise PydanticCustomError("iso_datetime", "must be ISO 8601 text with a time zone, such as 2026-11-01T00:00:00Z")
+    return value
+
+
+IsoDatetime = Annotated[datetime, BeforeValidator(_iso_text)]
+
+
 @router.get("/v1/tenants/{tenant_id}/charges")
-def get_charges(tenant_id: str, start: datetime, end: datetime,
+def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime,
                 caller: str = Depends(require_entitlement),
                 conn: psycopg.Connection = Depends(get_conn)) -> dict:
     if caller != tenant_id:

@@ -171,7 +171,7 @@ def test_payment_failed_for_an_unknown_customer_is_ignored_and_logged(client, co
         resp = post(client, payment_failed_event("evt_1", T, customer="cus_nobody"))
     assert resp.status_code == 200 and resp.json() == {"status": "ignored"}
     assert count(conn, "entitlements") == 0 and count(conn, "stripe_events") == 0
-    assert "webhook ignored: event=evt_1" in caplog.text
+    assert "webhook ignored: event='evt_1'" in caplog.text
 
 
 def test_payment_failed_does_not_reopen_a_canceled_tenant(client, conn):
