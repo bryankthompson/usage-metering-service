@@ -9,7 +9,7 @@ channel for this service: where a step says to ask, ask whoever runs it. Money i
     export BASE=http://localhost:8000 T=demo-1794359437      # T: the customer's tenant id (scripts/demo.sh prints its own on its step 1 line); BASE uses API_PORT
     psql() { docker compose exec -T db psql -U metering -d metering "$@"; }
 The tenant and the dates in the examples below (2026-11-10 and 11) come from one run: use your tenant and your UTC hours.
-These commands paste `$T` into a quoted SQL string, so a tenant id that contains a single quote is not supported here.
+The SQL examples pass the tenant to `psql` as a variable (`-v t=...`, used as `:'t'`), so `psql` quotes the id and an id with a single quote works there.
 
 ## 1. Pin the claim
 Write down: tenant `T`, period `[START, END)` in UTC (charges are per UTC hour), expected micros, billed micros (step 3).
@@ -17,7 +17,9 @@ Surprise: the customer quotes local time or a month: convert to UTC hours first.
 
 ## 2. Is the tenant entitled, and why
     curl -s -w ' [%{http_code}]\n' "$BASE/v1/tenants/$T/charges?start=START&end=END" -H "X-Tenant-Id: $T"
-    psql -x -c "SELECT status, plan, stripe_customer_id, payment_failed_at, grace_until FROM entitlements WHERE tenant_id = '$T'"
+    psql -x -v t="$T" <<'SQL'
+    SELECT status, plan, stripe_customer_id, payment_failed_at, grace_until FROM entitlements WHERE tenant_id = :'t';
+    SQL
     docker compose exec -T rollup python -m app.delinquent [--at ISO] [--json] [--fail-on-expired]
 Expect 200 and `status | active` with empty `grace_until`. The edge answers 401 (no header), 402 (no row, `canceled`, or
 `past_due` past `grace_until`: `{"detail":"not entitled: status canceled"}`) or 503 `{"detail":"entitlement check unavailable"}`
@@ -90,22 +92,28 @@ line compares with the other source: the usage the customer or Stripe saw was no
 Next: 5 if the numbers agree with the log but not the customer.
 
 ## 5. Accepted but not billed
-    psql -c "SELECT e.id, e.idempotency_key, e.tokens_in, e.tokens_out, e.occurred_at, e.received_at, c.closed_at
-             FROM usage_events e JOIN closed_hours c ON c.hour_start = date_trunc('hour', e.occurred_at, 'UTC')
-             WHERE e.tenant_id = '$T' AND e.late ORDER BY e.id"
+    psql -v t="$T" <<'SQL'
+    SELECT e.id, e.idempotency_key, e.tokens_in, e.tokens_out, e.occurred_at, e.received_at, c.closed_at
+    FROM usage_events e JOIN closed_hours c ON c.hour_start = date_trunc('hour', e.occurred_at, 'UTC')
+    WHERE e.tenant_id = :'t' AND e.late ORDER BY e.id;
+    SQL
      4 | late-1 | 400 | 100 | 2026-11-10 23:45:00+00 | 2026-11-11 01:10:47+00 | 2026-11-11 01:10:38+00
 A late event was stored but its hour was already closed when it arrived (`received_at` after `closed_at`); it is never in a
 rollup, never billed, and no code reopens the hour. A client chooses `occurred_at`, so it can also choose a closed hour:
 `reconcile` counts them (the `late` line, step 4). Per hour, billed against late:
 
-    psql -c "SELECT date_trunc('hour', occurred_at, 'UTC') AS hour, count(*) FILTER (WHERE NOT late) AS counted,
-             count(*) FILTER (WHERE late) AS late FROM usage_events WHERE tenant_id = '$T' GROUP BY 1 ORDER BY 1"
+    psql -v t="$T" <<'SQL'
+    SELECT date_trunc('hour', occurred_at, 'UTC') AS hour, count(*) FILTER (WHERE NOT late) AS counted,
+    count(*) FILTER (WHERE late) AS late FROM usage_events WHERE tenant_id = :'t' GROUP BY 1 ORDER BY 1;
+    SQL
      2026-11-10 23:00:00+00 | 2 | 2
 Events in an hour with no `closed_hours` row are simply not closed yet: the hour is due 5 minutes after it ends and the
 `rollup` service runs every 3600 s. Open hours of the tenant:
 
-    psql -c "SELECT date_trunc('hour', e.occurred_at, 'UTC') AS hour, count(*) FROM usage_events e WHERE e.tenant_id = '$T'
-             AND NOT EXISTS (SELECT 1 FROM closed_hours c WHERE c.hour_start = date_trunc('hour', e.occurred_at, 'UTC')) GROUP BY 1"
+    psql -v t="$T" <<'SQL'
+    SELECT date_trunc('hour', e.occurred_at, 'UTC') AS hour, count(*) FROM usage_events e WHERE e.tenant_id = :'t'
+    AND NOT EXISTS (SELECT 1 FROM closed_hours c WHERE c.hour_start = date_trunc('hour', e.occurred_at, 'UTC')) GROUP BY 1;
+    SQL
      2026-11-11 01:00:00+00 | 1
 Known cause: a closed hour is closed for every tenant, and any tenant's event in an old quiet hour makes the next rollup close
 it, so another tenant's later event for that hour is late. Billing late events is a decision for the business, not a command.
@@ -130,8 +138,10 @@ A version dated before invoiced hours changes what those hours would be rated at
 in the run above the 409 `no price for model 'zz-model' at 2026-11-10T22:00:00+00:00` became a 200 with `price_version` 1.
 
 ## 7. A missing or doubled event
-    psql -c "SELECT id, idempotency_key, model, tokens_in, tokens_out, occurred_at, received_at, late FROM usage_events
-             WHERE tenant_id = '$T' AND idempotency_key = 'late-1'"
+    psql -v t="$T" <<'SQL'
+    SELECT id, idempotency_key, model, tokens_in, tokens_out, occurred_at, received_at, late FROM usage_events
+    WHERE tenant_id = :'t' AND idempotency_key = 'late-1';
+    SQL
 `POST /v1/usage` answers 201 `accepted` (stored), 200 `duplicate` (same key and payload: nothing stored), 409 (`idempotency_key
 was already used with a different payload`; nothing stored), 403 (`tenant_id does not match the entitled tenant`), 422 (invalid
 body, or `occurred_at` not ISO text), 413 (body over 64 KiB: step 12), or an edge 401/402/503. The log
@@ -144,8 +154,10 @@ body, or `occurred_at` not ISO text), 413 (body over 64 KiB: step 12), or an edg
 Missing: no row, so it was never accepted; ask the client for the status it saw. The hour is the UTC hour of `occurred_at`,
 not `received_at`. Doubled: the service dedupes only on (tenant, key); two keys for one real call are two events. Look-alikes:
 
-    psql -c "SELECT model, tokens_in, tokens_out, occurred_at, array_agg(idempotency_key ORDER BY id) AS keys FROM usage_events
-             WHERE tenant_id = '$T' GROUP BY 1,2,3,4 HAVING count(*) > 1"
+    psql -v t="$T" <<'SQL'
+    SELECT model, tokens_in, tokens_out, occurred_at, array_agg(idempotency_key ORDER BY id) AS keys FROM usage_events
+    WHERE tenant_id = :'t' GROUP BY 1,2,3,4 HAVING count(*) > 1;
+    SQL
      demo-model | 400 | 100 | 2026-11-10 23:45:00+00 | {late-1,late-1-retry}
 A doubled event is refused deletion by a trigger on UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger): do not bypass it. There is no
 adjustment feature: ask whoever runs this service for a manual credit, with the two keys from the query above.

@@ -56,8 +56,10 @@ No admin API: prices are added through `add_price_version`. Nothing is sent to S
 `STRIPE_WEBHOOK_SECRET`) before it touches the database. No secret set (or a blank one): 503. A body over 1 MiB: 413
 (it is read before the signature can be checked, so it is capped). Missing or bad signature, a timestamp older than
 5 minutes, or an unparsable body: 400. A database that fails or cannot be reached mid-request (`psycopg.OperationalError`) is
-503 on every route that uses the database, not 500, with `Retry-After: 1`. So is a wait of more than 2 seconds
-(`db.LOCK_WAIT`) for a held lock, such as the tenant's advisory lock or its entitlement row: the event is not recorded
+503, not 500, with `Retry-After: 1` (the handler in `app/main.py`). Two 503s carry no `Retry-After`: the edge's
+`entitlement check unavailable` (`app/edge.py`, the API cannot read the entitlement), and the webhook's own refusals for a
+missing secret or an unusable `GRACE_PERIOD_HOURS` (`app/webhooks.py`). A wait of more than 2 seconds (`db.LOCK_WAIT`) for a
+held lock, such as the tenant's advisory lock or its entitlement row, is a 503 with `Retry-After: 1` too: the event is not recorded
 and Stripe's retry applies it. The rollup (closing) side never times out. `/healthz` does not touch the database and keeps
 answering 200. The tenant is `subscription.metadata.tenant_id` (the row is created or updated) or, for invoices, the
 `entitlements` row with that `stripe_customer_id`. No tenant found: 200

@@ -23,8 +23,8 @@ was tried and held. Later rounds re-ran the earlier repros against the fixed cod
 | Claims, re-check | [claims.md](claims.md) | `82bc2df` | not stated | 0 | 0 (+1 note) | The runbook, testing and demo pages, and one paragraph of the ingest page |
 | Claims, final check (before #38) | [claims.md](claims.md) | `e603a15` | not stated | 0 | 1 (+2 notes) | The diff since `82bc2df`; name and secret sweeps of the tree and the history |
 
-The first four lenses add up to the totals the README gives: round 1, 0 blockers, 9 major and 10 minor; round 2, 0 blockers,
-3 major and 7 minor. The claims lens did not count blockers.
+The first four lenses add up to the totals the README gives: round 1, 0 blockers, 9 major and 10 minor; round 2, 0 blockers reported (the
+operations report gives no count), 3 major and 7 minor. The claims lens did not count blockers.
 
 **What was changed from the originals.** A header line was added to each report. Local checkout paths were shortened to the
 file or script name (the attack scripts named in the reports, such as `a1.py` or `wh.py`, are not in the repository). The

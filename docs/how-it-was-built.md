@@ -92,7 +92,7 @@ Each round's report, and the commit it tested, is in [docs/reviews/](reviews/REA
 | Round | Lenses | Blocker | Major | Minor |
 |--|--|--|--|--|
 | Round 1 (on the first merged code) | money, concurrency, security, operations | 0 | 9 | 10 |
-| Round 2 (re-run repros, attack the fixes) | the same four | 0 | 3 | 7 |
+| Round 2 (re-run repros, attack the fixes) | the same four | 0 reported (operations gives no count) | 3 | 7 |
 | Round 3 (the new delete rule) | concurrency | 0 | 0 | 2 |
 | Claims, first pass (words against code) | claims | not counted | 0 | 9 |
 | Claims, re-check of the runbook, testing and demo pages | claims | not counted | 0 | 0 |
@@ -183,7 +183,7 @@ is below, each from their own words in the session, and each changed what was bu
 - **How the work is checked.** Independent review and a green CI check on every merge, and the repo was private while it
   was built; it was made public on 2026-11-10. The operator also said that the way the sessions work together is part of
   what the build is meant to show, so the build log is kept as it happens.
-- **What the platform adapter may be.** It is named only in its own files, it runs on recorded responses because there was no
+- **What the platform adapter may be.** It is named only in its own files, it runs on hand-written fixtures because there was no
   API key, and no live call is ever claimed (build log 17:20).
 - **The bar at the end (17:20).** The build should use the platform of the people it is for, have a way to be tested, be
   robust, and be attacked by adversarial agents at the final review. That became the adapter, the testing guide and the red-team
