@@ -63,8 +63,8 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
   integer from 0 to 8760, a failure that has to open a grace window is **503** and not recorded, so Stripe
   retries it; other events are unaffected.
 - Each event id is stored in the same transaction as its change: a redelivery is **200** `duplicate`. An event
-  older than the last one applied does not overwrite newer state (`stale`; one narrow exception for an older payment
-  failure is in [docs/billing.md](docs/billing.md)). Unknown tenants and unhandled event types
+  older than the last one applied does not overwrite newer state (`stale`; two narrow exceptions, an older payment
+  failure and a delete of the stored subscription, are in [docs/billing.md](docs/billing.md)). Unknown tenants and unhandled event types
   are `ignored`. Past the signature check every answer is 200 `{"status": ...}`, except a malformed event
   (**400**), a body over 1 MiB (**413**) and a database failure (**503**; Stripe retries it).
 
@@ -173,10 +173,10 @@ that shows it. Round one found 0 blockers, 9 major and 10 minor. Seven of the ma
 every unpriced model, a same-second event that could undo a cancel, a held lock and a paused database that hung the whole
 API (now a 503), a request body buffered before the 401 (now capped), and one poisoned rollup hour that blocked every
 later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
-lane's own repros against the fixed code and attacked the fixes: 0 blockers, 3 major, 7 minor. One major became a code
-change (the database lives in a named volume: `docker compose down` followed by `up` had started an empty one); two are
-written down with their bounds in [docs/billing.md](docs/billing.md) and [docs/ingest.md](docs/ingest.md) (a cancel older
-than an applied payment failure, and a database that freezes after the connection was made). The review reports are not
+lane's own repros against the fixed code and attacked the fixes: 0 blockers, 3 major, 7 minor. Two majors became code
+changes (a cancel older than an applied payment failure was lost; the database lives in a named volume now, because
+`docker compose down` followed by `up` had started an empty one); one is written down with its bound in
+[docs/ingest.md](docs/ingest.md) (a database that freezes after the connection was made). The review reports are not
 in this repository.
 
 **What the gates and the cross-checks caught.**

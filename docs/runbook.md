@@ -138,7 +138,8 @@ A doubled event cannot be deleted (a trigger refuses UPDATE and DELETE) and ther
 ## 8. Webhooks and grace
     psql -c "SELECT event_id, type, received_at FROM stripe_events ORDER BY received_at"
     psql -c "SELECT tenant_id, status, stripe_customer_id AS customer, payment_failed_at, grace_until, last_event_at FROM entitlements ORDER BY tenant_id"
-A signed event is `processed` (state changed), `stale` (older than the last applied event for that tenant: ignored, but recorded),
+A signed event is `processed` (state changed), `stale` (older than the last applied event for that tenant: ignored, but recorded; the one exception is a delete of the
+tenant's stored subscription, which is applied whatever its age),
 `duplicate` (event id already in `stripe_events`) or `ignored` (no tenant in the metadata, an unknown customer, an unhandled event
 type, or a failed payment for a `canceled` tenant). The HTTP answer is `{"status": ...}`. `processed` and `stale` leave a
 `stripe_events` row; a `duplicate` adds nothing and an `ignored` event is not recorded in the table, so read the outcome line
