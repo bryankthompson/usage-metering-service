@@ -33,10 +33,14 @@ ClickHouse cannot be reached.
 
 ## Checking it
 `--export-actuals FILE` writes one JSON line per (tenant, model, hour) from ClickHouse, the format `--actuals` reads
-(`docs/reconcile.md`). `app.reconcile` reports a row on one side only and any column beyond tolerance, and exits 1. That also
+(`docs/reconcile.md`). `app.reconcile` reports a row on one side only and any column beyond tolerance, and exits 1. If ClickHouse has rows for an hour that is not in `closed_hours`, reconcile would skip them (it counts skipped actuals on stderr only), so
+`--export-actuals` names those hours on stderr, still writes the file and exits 1. That also
 catches rows that exist only in ClickHouse, which `--backfill` does not look at and does not delete.
 
 ## Limits
+- Hours from 1970-01-01 to 2106-02-07 06:00 UTC only (ClickHouse `DateTime`); ingest accepts UTC years 1 to 9999. An hour outside
+  the range is not written (ClickHouse would wrap it silently): the close logs `clickhouse mirror failed`, and `--backfill` fails on it
+  every run and exits 1. The Postgres rollup and the bill are unaffected.
 - A derived copy, not the bill; late events are never in it, as in the Postgres rollup.
 - Best effort at close time, recovered by `--backfill` (run it by hand or from cron; nothing schedules it).
 - No authentication on the local ClickHouse (`CLICKHOUSE_SKIP_USER_SETUP`, port on 127.0.0.1 only), single node, no replication, no TLS.

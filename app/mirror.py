@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,10 +76,19 @@ def _row_values(row: dict) -> tuple[int, int, int]:
     return (row["tokens_in"], row["tokens_out"], row["event_count"])
 
 
+# DateTime('UTC') holds 1970-01-01 to 2106-02-07 UTC; ingest accepts UTC years 1 to 9999. ClickHouse would wrap or clamp
+# an hour outside its range without an error, so the mirror refuses it instead (logged; backfill fails on it every run).
+MIN_HOUR = datetime(1970, 1, 1, tzinfo=timezone.utc)
+MAX_HOUR = datetime(2106, 2, 7, 6, tzinfo=timezone.utc)
+
+
 def write_rows(url: str, rows: list[dict]) -> None:
     """Create the table if needed and insert `rows` (Postgres rollup rows). Raises on any failure."""
     if not rows:
         return
+    for r in rows:
+        if not MIN_HOUR <= _utc(r["hour_start"]) <= MAX_HOUR:
+            raise ValueError(f"hour {_utc(r['hour_start']).isoformat()} is outside ClickHouse DateTime (1970-01-01 to 2106-02-07 UTC)")
     version = int(datetime.now(timezone.utc).timestamp() * 1_000_000)  # a later write of a row wins
     lines = [
         json.dumps({
@@ -147,12 +157,20 @@ def backfill(conn, url: str) -> tuple[int, list[datetime]]:
     return sent, failed
 
 
-def export_actuals(url: str, path: str) -> int:
-    """Write ClickHouse's totals as JSON lines for `app.reconcile --actuals`. Returns the number of lines."""
+def export_actuals(conn, url: str, path: str) -> tuple[int, list[datetime]]:
+    """Write ClickHouse's totals as JSON lines for `app.reconcile --actuals`. Returns (lines, orphan hours).
+
+    Orphan hours are hours ClickHouse has rows for that are not in `closed_hours`: reconcile skips those actuals
+    (counting them on stderr only), so the caller must treat them as a failure.
+    """
     mirrored = read_mirror(url)
-    tmp = path + ".tmp"  # write beside it and rename, so an interrupted export keeps the previous complete file
+    closed = {_utc(r["hour_start"]) for r in conn.execute("SELECT hour_start FROM closed_hours").fetchall()}
+    conn.commit()
+    orphans = sorted({hour for (_t, _m, hour) in mirrored if hour not in closed})
+    # A unique temp file beside the target, then a rename: an interrupted or concurrent export never leaves a torn file.
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path)))
     try:
-        with open(tmp, "w") as f:
+        with os.fdopen(fd, "w") as f:
             for (tenant, model, hour), (tokens_in, tokens_out, _events) in sorted(mirrored.items()):
                 f.write(json.dumps({"tenant_id": tenant, "model": model, "hour": hour.isoformat(),
                                     "tokens_in": tokens_in, "tokens_out": tokens_out}) + "\n")
@@ -161,7 +179,7 @@ def export_actuals(url: str, path: str) -> int:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
-    return len(mirrored)
+    return len(mirrored), orphans
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -184,7 +202,16 @@ def main(argv: list[str] | None = None) -> None:
             if failed:
                 sys.exit(1)
         else:
-            print(f"mirror: wrote {export_actuals(url, args.export_actuals)} rows to {args.export_actuals}", flush=True)
+            conn = db.connect(statement_timeout_ms=0)
+            try:
+                rows, orphans = export_actuals(conn, url, args.export_actuals)
+            finally:
+                conn.close()
+            print(f"mirror: wrote {rows} rows to {args.export_actuals}", flush=True)
+            if orphans:  # reconcile would skip these silently
+                hours = ", ".join(h.isoformat() for h in orphans)
+                print(f"mirror: ClickHouse has rows for hours not in closed_hours (reconcile skips them): {hours}", file=sys.stderr)
+                sys.exit(1)
     except (RuntimeError, OSError, ValueError) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
         print(f"mirror: {err}", file=sys.stderr)
         sys.exit(1)

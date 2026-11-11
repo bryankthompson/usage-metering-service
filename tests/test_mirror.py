@@ -147,6 +147,38 @@ def test_export_actuals_writes_the_lines_reconcile_reads(conn, ch, tmp_path):
     two_rows(conn)
     close_hour(conn, H)
     path = tmp_path / "actuals.jsonl"
-    assert mirror.export_actuals(ch.url, str(path)) == 2
+    assert mirror.export_actuals(conn, ch.url, str(path)) == (2, [])
     from app.reconcile import read_actuals
     assert read_actuals(str(path)) == {("t1", "mA", H): (10, 1), ("t2", "mB", H): (7, 3)}
+
+
+def test_export_names_clickhouse_only_hours_on_stderr_and_exits_1(conn, ch, tmp_path, capsys):
+    two_rows(conn)
+    close_hour(conn, H)
+    stray = {"tenant_id": "t9", "model": "mZ", "hour_start": "2026-11-10 03:00:00", "tokens_in": 1, "tokens_out": 1, "event_count": 1}
+    ch.rows[("t9", "mZ", stray["hour_start"])] = stray  # in ClickHouse, hour never closed in Postgres
+    path = tmp_path / "actuals.jsonl"
+    with pytest.raises(SystemExit) as exit_:
+        mirror.main(["--export-actuals", str(path)])
+    assert exit_.value.code == 1
+    assert "2026-11-10T03:00:00+00:00" in capsys.readouterr().err
+    assert len(path.read_text().splitlines()) == 3  # the file is still written
+
+
+def test_export_leaves_no_temp_file_beside_the_target(conn, ch, tmp_path):
+    two_rows(conn)
+    close_hour(conn, H)
+    mirror.export_actuals(conn, ch.url, str(tmp_path / "a.jsonl"))
+    assert [p.name for p in tmp_path.iterdir()] == ["a.jsonl"]
+
+
+def test_hour_outside_the_clickhouse_range_is_refused_logged_and_fails_backfill(conn, ch, caplog):
+    add_event(conn, "old", "1969-12-31T23:05:00Z")
+    add_event(conn, "ok", "2026-11-10T10:05:00Z")
+    old = datetime(1969, 12, 31, 23, tzinfo=timezone.utc)
+    with caplog.at_level(logging.ERROR):
+        close_hour(conn, old)
+        close_hour(conn, H)
+    assert "clickhouse mirror failed: hour=1969-12-31T23:00:00+00:00" in caplog.text
+    assert [k[2] for k in ch.rows] == ["2026-11-10 10:00:00"]  # the good hour is mirrored, nothing wrapped
+    assert mirror.backfill(conn, ch.url) == (0, [old])
