@@ -1,6 +1,5 @@
 """Postgres access: plain SQL through psycopg. Each caller opens and closes its own connection."""
 import os
-from collections.abc import Iterator
 from pathlib import Path
 
 import psycopg
@@ -61,12 +60,3 @@ def apply_schema(conn: psycopg.Connection) -> None:
     for path in sorted(SCHEMA_DIR.glob("*.sql")):
         conn.execute(path.read_text())
     conn.commit()
-
-
-def get_conn() -> Iterator[psycopg.Connection]:
-    """FastAPI dependency: a connection that is closed when the request ends."""
-    conn = connect()
-    try:
-        yield conn
-    finally:
-        conn.close()
