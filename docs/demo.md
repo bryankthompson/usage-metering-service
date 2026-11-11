@@ -14,10 +14,10 @@
 Needs on the host: docker compose v2 (`docker compose`; `up --wait` for the restore recipe below), python3 and curl (the script signs the webhook with python3).
 Free ports: 8000 and 5432, or set `API_PORT` and `DB_PORT`.
 
-    docker compose up -d --build
+    docker compose up -d --build --wait
     scripts/demo.sh
 
-Give the api a few seconds to start: `FAIL step 3: expected 200, got 000` means it was not listening yet, so run the script again.
+Use `--wait` (or `scripts/up`) so the command returns when the api answers; a plain `up -d` does not. `FAIL step 3: expected 200, got 000` means it was not listening yet, so run the script again.
 The API port is `API_PORT` (default 8000); the api and db ports listen on 127.0.0.1 only. Expected last lines: the
 charges JSON with `"total_micros": 6000`, then `demo ok`. Any unexpected status or value prints `FAIL step N:
 expected X, got Y` with the body and exits non-zero.
