@@ -143,7 +143,7 @@ not `received_at`. Doubled: the service dedupes only on (tenant, key); two keys 
     psql -c "SELECT model, tokens_in, tokens_out, occurred_at, array_agg(idempotency_key ORDER BY id) AS keys FROM usage_events
              WHERE tenant_id = '$T' GROUP BY 1,2,3,4 HAVING count(*) > 1"
      demo-model | 400 | 100 | 2026-11-10 23:45:00+00 | {late-1,late-1-retry}
-A doubled event is refused deletion by a trigger on UPDATE and DELETE (the table owner can bypass it: do not) and there is no
+A doubled event is refused deletion by a trigger on UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger): do not bypass it. There is no
 adjustment feature: ask whoever runs this service for a manual credit, with the two keys from the query above.
 
 ## 8. Webhooks and grace
@@ -191,7 +191,7 @@ log as tenant data). Find who is in that hour (a sum past 9.2e18 tokens, from ev
     psql -c "SELECT tenant_id, model, count(*) AS events, sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out FROM usage_events
              WHERE date_trunc('hour', occurred_at, 'UTC') = '2026-11-10T20:00:00Z' AND NOT late GROUP BY 1, 2 ORDER BY 4 DESC"
      demo-1794359437 | demo-model | 2 | 10000000000000000000 | 0
-What to do: read `error=`. `bigint out of range`: no command closes it. The events are refused deletion by the append-only trigger (the table owner can bypass it: do not) and the columns
+What to do: read `error=`. `bigint out of range`: no command closes it. The events are refused deletion by the append-only trigger; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger): do not bypass it. The columns
 stay BIGINT until a developer widens them (docs/ingest.md, Known limit): ask whoever runs this service, with the `rollup failed` line and this output; until then the hour
 is not billed and stays in `unclosed_hours`. Any other error: fix the cause it names (the one reproduced here was a CHECK constraint added by hand
 on `usage_rollups_hourly` and then dropped), then run `python -m app.rollup` again (above) or wait one cycle; the hour closes
