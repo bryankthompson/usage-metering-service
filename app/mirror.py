@@ -8,6 +8,7 @@ the JSON lines file `python -m app.reconcile --actuals` reads. See docs/clickhou
 CLI: `python -m app.mirror --backfill | --export-actuals FILE`.
 """
 import argparse
+import http.client
 import json
 import logging
 import os
@@ -56,7 +57,10 @@ def clickhouse_url() -> str | None:
 
 def _post(url: str, query: str, body: bytes = b"") -> bytes:
     """One HTTP POST to ClickHouse. Raises on a refused connection, a timeout or a non-2xx answer (with its text)."""
-    request = urllib.request.Request(url.rstrip("/") + "/?" + urllib.parse.urlencode({"query": query}), data=body, method="POST")
+    parts = urllib.parse.urlsplit(url)  # keep query parameters already in the URL (database, user), set ours
+    params = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k != "query"] + [("query", query)]
+    full = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/") + "/", urllib.parse.urlencode(params), ""))
+    request = urllib.request.Request(full, data=body, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
             return response.read()
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> None:
                 hours = ", ".join(h.isoformat() for h in orphans)
                 print(f"mirror: ClickHouse has rows for hours not in closed_hours (reconcile skips them): {hours}", file=sys.stderr)
                 sys.exit(1)
-    except (RuntimeError, OSError, ValueError) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
+    except (RuntimeError, OSError, ValueError, http.client.HTTPException) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
         print(f"mirror: {err}", file=sys.stderr)
         sys.exit(1)
 
