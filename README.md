@@ -44,7 +44,7 @@ force at the start of its hour, so a price change applies from the first hour th
 total with a non-empty list is partial (100 entries means at least 100). Use `start` and `end` on UTC hour boundaries: an
 hour is in or out of a range by its start, so a range that cuts an hour includes or drops all of it. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
 not ISO 8601 text, `start >= end`, or a range wider than 366 days, **409** when a row has no price in force (the message
-names every model without one, with its first hour). Details: [docs/billing.md](docs/billing.md).
+names the models without one, with the first hour of each; past 20 it says how many more). Details: [docs/billing.md](docs/billing.md).
 
 **5. Stripe test-mode webhooks set the entitlement.** `POST /v1/stripe/webhook` (`app/webhooks.py`) checks
 the `Stripe-Signature` header on the raw body with `STRIPE_WEBHOOK_SECRET` before it touches the database:
@@ -73,7 +73,8 @@ The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement 
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
 Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
 a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored), a connection that takes more than 5 s to open and a
-statement that runs more than 15 s on the request path; the rollup, reconcile and delinquent runs have no statement timeout.
+statement that runs more than 15 s on the request path (the edge's own 503, "entitlement check unavailable", carries no `Retry-After`); the
+rollup, reconcile and delinquent runs have no statement timeout.
 
 **7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and
 exits 0 when the stored rollups agree, 1 on drift (including a rollup row whose hour is not closed), 2 on bad input;
@@ -94,8 +95,8 @@ hand-written fixtures, the real app and a local stand-in server. No call to the 
 | Method | Path | Success | Other answers |
 |--|--|--|--|
 | GET | `/healthz` | 200 `{"status": "ok"}` | none; no edge check |
-| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 403, 409, 413, 422; edge 401, 402, 503 |
-| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422; edge 401, 402, 503 |
+| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 400, 403, 409, 413, 422, 503; edge 401, 402, 503 |
+| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503; no edge check, the signature is the check |
 
 ## Run it
