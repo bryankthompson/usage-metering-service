@@ -33,10 +33,10 @@ Failure added: the second write can fail after the first commits, so it needs it
 **Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
 `restart: unless-stopped` (`compose.yaml:13-18`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
 (`compose.yaml:20-32`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:34-42`).
-Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:46-48`). The API answers 503 on
-every route when the database is unreachable (`app/main.py:36-44`) and 413 to a webhook body over 1 MiB
+Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:49-55`). The API answers 503 on
+every route when the database is unreachable (`app/main.py:39-47`) and 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
-`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:16-30`). A cluster would add liveness and readiness probes
+`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:17-31`). A cluster would add liveness and readiness probes
 on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and
 secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in the file. No manifests are written and none are tested.
 
