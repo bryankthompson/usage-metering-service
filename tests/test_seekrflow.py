@@ -75,6 +75,11 @@ def test_missing_or_bad_usage_raises_and_is_never_zero(break_it):
         usage_event(response, TENANT)
 
 
+def test_response_without_a_model_and_no_model_argument_says_to_pass_model():
+    with pytest.raises(MissingUsage, match="--model"):
+        usage_event(EMB, TENANT)
+
+
 def test_fixture_without_usage_raises():
     with pytest.raises(MissingUsage):
         usage_event(load("seekr_chat_no_usage.json"), TENANT)
@@ -171,6 +176,11 @@ def test_cli_replay_exits_non_zero_on_missing_usage_and_posts_nothing(api, conn,
     path = str(FIXTURES / "seekr_chat_no_usage.json")
     assert seekrflow.main(["replay", path, "--tenant", TENANT, "--api", api]) == 1
     assert "usage" in capsys.readouterr().err and rows(conn) == 0
+
+
+def test_cli_replay_of_embeddings_without_model_exits_non_zero_and_posts_nothing(api, conn, capsys):
+    assert seekrflow.main(["replay", str(FIXTURES / "seekr_embeddings.json"), "--tenant", TENANT, "--api", api]) == 1
+    assert "--model" in capsys.readouterr().err and rows(conn) == 0
 
 
 def test_cli_replay_exits_non_zero_when_the_intake_refuses(api, conn, capsys):

@@ -44,10 +44,13 @@ def usage_event(response: dict, tenant_id: str, model: str | None = None) -> dic
     created = response.get("created")
     if isinstance(created, bool) or not isinstance(created, int):
         raise MissingUsage(f"response created is missing or not an integer: {created!r}")
+    model = response.get("model") or model
+    if not model:
+        raise MissingUsage(f"response {response.get('id')!r} has no model (embeddings responses have none): pass --model")
     return {
         "tenant_id": tenant_id,
         "idempotency_key": response["id"],
-        "model": response.get("model") or model,
+        "model": model,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
         "occurred_at": datetime.fromtimestamp(created, timezone.utc).isoformat(),
