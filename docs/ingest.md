@@ -50,7 +50,7 @@ to commit; `close_hour` takes the exclusive lock for the hour before it reads an
   changes a closed rollup row.
 
 **CLI:** `python -m app.rollup` closes the due hours once; `--every SECONDS` repeats. It prints
-`closed hour=... rows=N events=N` per closed hour, or `nothing due`, and exits non-zero on an error.
+`closed hour=... rows=N events=N` per closed hour, or `nothing due`. A close runs with no statement timeout.
 Compose runs it as the `rollup` service (`--every 3600`).
 
 **Tests:** `uv run pytest -q tests/test_rollup.py`. The lock tests hold one side's lock by hand and
@@ -60,6 +60,12 @@ check the other side waits.
 
 **Known limit:** the rollup token columns are BIGINT. If one tenant's events for one model in one UTC hour
 (taken from the client's `occurred_at`, so not necessarily the current hour) sum past 9.2e18 tokens, which is
-9,223,373 events at the 10^12 per-event cap, closing that hour fails with `bigint out of range`, rolls back, and
-`python -m app.rollup` exits non-zero. Compose restarts the service, so it fails again, loudly, and no later hour
-closes until the columns are widened to NUMERIC.
+9,223,373 events at the 10^12 per-event cap, closing that hour fails with `bigint out of range` and rolls back (no `closed_hours` row, no rollup rows).
+The hour stays unclosed and is retried every run until the columns are widened to NUMERIC.
+
+**A failed hour** is logged at ERROR as `rollup failed: hour=<UTC hour> error=...` (no tenant) and the later hours still close.
+The one-shot run prints `rollup: closed N hours, failed M: <hours>` and exits 1; with `--every` the loop keeps sleeping and logs it every cycle.
+Find it with `docker compose logs rollup | grep "rollup failed"`. Hours may close out of order; that never makes an event late.
+
+**Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
+so a database that stops answering is a 503 and `/healthz` keeps answering.
