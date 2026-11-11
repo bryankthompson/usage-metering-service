@@ -12,7 +12,7 @@ import psycopg
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from app.db import connect
+from app.db import connect, limit_lock_wait
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +120,13 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     row = _lock_entitlement(conn, "tenant_id", tenant_id)
     if row and row["last_event_at"] and created < row["last_event_at"]:
         return "stale", tenant_id
+    if (row and row["last_event_at"] == created and row["status"] == "canceled"
+            and event["type"] != "customer.subscription.deleted"):
+        # Stripe's `created` has one-second resolution and delivery order is not guaranteed, so a late `updated(active)` can
+        # carry the cancel's own second. Ties apply in arrival order except this one: a tie never undoes a cancel.
+        log.warning("webhook tie after cancel: event=%r type=%r tenant=%r shares the second of the cancel and is stale",
+                    event["id"], event["type"], tenant_id)
+        return "stale", tenant_id
     # A deleted subscription is canceled whatever status its payload carries (fail closed).
     raw_status = sub.get("status")
     status = "canceled" if event["type"] == "customer.subscription.deleted" else STATUS_MAP.get(
@@ -199,6 +206,7 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
     if handler is None:
         log.info("webhook ignored: event=%r type=%r is not handled", event["id"], event["type"])
         return "ignored"
+    limit_lock_wait(conn)      # a held tenant or row lock is a 503 (Stripe retries) after db.LOCK_WAIT, not a pinned thread
     inserted = conn.execute(
         "INSERT INTO stripe_events (event_id, type) VALUES (%s, %s) ON CONFLICT (event_id) DO NOTHING RETURNING event_id",
         (event["id"], event["type"])).fetchone()

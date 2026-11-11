@@ -14,8 +14,41 @@ def database_url() -> str:
     return os.environ.get("DATABASE_URL", DEFAULT_URL)
 
 
-def connect(url: str | None = None) -> psycopg.Connection:
-    return psycopg.connect(url or database_url(), row_factory=dict_row)
+CONNECT_TIMEOUT_S = 5
+REQUEST_STATEMENT_TIMEOUT_MS = 15_000
+
+
+def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) -> psycopg.Connection:
+    """Open a connection that gives up after CONNECT_TIMEOUT_S, so a database that stops answering is a 503, not a hang.
+
+    The default is the request path's: statements are cancelled after REQUEST_STATEMENT_TIMEOUT_MS (psycopg raises
+    QueryCanceled, an OperationalError, which the API answers with 503). The rollup close, reconcile and delinquent
+    pass `statement_timeout_ms=0` (no limit): a large hour legitimately takes longer.
+    """
+    if statement_timeout_ms is None:
+        statement_timeout_ms = REQUEST_STATEMENT_TIMEOUT_MS
+    conn = psycopg.connect(url or database_url(), row_factory=dict_row, connect_timeout=CONNECT_TIMEOUT_S)
+    try:
+        # A session SET, not the `options` keyword: that would replace any options in the URL or PGOPTIONS.
+        conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(int(statement_timeout_ms)),))
+        conn.commit()
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+LOCK_WAIT = "2s"        # how long a request waits for a lock before it answers 503; never used on the rollup (closing) side
+
+
+def limit_lock_wait(conn: psycopg.Connection) -> None:
+    """For the rest of the current transaction, a wait for any lock longer than LOCK_WAIT raises LockNotAvailable.
+
+    A request that waits for a held lock pins a worker thread and a connection; about 40 of them hang the whole API
+    (healthz included). The error is a psycopg.OperationalError, so it is answered 503 with Retry-After, and the same
+    request can be resent: nothing of the failed attempt is committed. Same as SET LOCAL lock_timeout.
+    """
+    conn.execute("SELECT set_config('lock_timeout', %s, true)", (LOCK_WAIT,))
 
 
 def apply_schema(conn: psycopg.Connection) -> None:
