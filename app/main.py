@@ -33,6 +33,7 @@ def configure_logging() -> None:
 def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="usage-metering")
+    # The cap is per path: a new POST route that takes a body must be added to `limits`, or it has no cap (the webhook has its own).
     app.add_middleware(BodyLimit, limits={"/v1/usage": ingest.MAX_BODY_BYTES})
 
     @app.exception_handler(psycopg.OperationalError)

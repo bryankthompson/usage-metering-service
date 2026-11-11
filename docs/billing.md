@@ -38,7 +38,9 @@ Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive d
 `start >= end`, or a range wider than 366 days (ask for the period in pieces: every row of the range is loaded at once),
 409 if a row has no price in force: the whole range is refused (no partial bill), and the detail names every unpriced model
 in the range, sorted, with the first hour of each (at most 20, then "and N more"), so all the missing prices can be added in
-one pass. The route sits behind `require_entitlement`, so
+one pass. The answer has one line per tenant, model and hour, and no cap on the number of lines is built: the red team
+asked for 366 days of 114 models (about 1M rows) and got a 114 MB body in 3.6 s (RT-operations-11, not repeated here).
+Ask for narrower ranges. The route sits behind `require_entitlement`, so
 the edge can also answer 401, 402 or 503 as in the edge table below.
 
 ## Tests
@@ -75,7 +77,8 @@ arrives afterwards does not move it (a difference of seconds to minutes with Str
 subscription event clears the window; the next failure starts a new one. `invoice.paid` is not handled: only `customer.subscription.*` events restore `active`.
 
 Each event id is recorded in `stripe_events` in the same transaction as the change; a redelivery is 200 `duplicate`.
-An event older than `last_event_at` does not overwrite newer state (200 `stale`). Events with the same `created` second
+An event older than `last_event_at` does not overwrite newer state (200 `stale`); the clock is shared by invoice and
+subscription events, which can make a cancel stale (see "Assumptions and limits"). Events with the same `created` second
 apply in arrival order (Stripe's `created` has one-second resolution and gives no order inside a second), with one rule:
 **a tie never undoes a cancel.** A `customer.subscription.created/updated` whose `created` equals the `last_event_at` of
 a `canceled` tenant is `stale` and logged (`webhook tie after cancel`), so a late `updated(active)` of the cancel's own
@@ -125,6 +128,21 @@ These are known and not fixed; see also the two assumptions above (one customer 
 - **A far-future `created` pins a tenant.** `last_event_at` takes the event's `created`, and a later event with an earlier
   `created` is `stale`. A signed event dated far in the future (a Stripe clock fault) would make real events stale for that tenant
   until the row is repaired. Not tested.
+- **A cancel older than an applied payment failure is lost** (found by red-team review, RT-concurrency-4).
+  `invoice.payment_failed` and the `customer.subscription.*` events share one `last_event_at`. If a failure with `created`
+  1001 is applied first and a `customer.subscription.deleted` with `created` 1000 arrives after it, the delete is `stale`:
+  answered 200 and recorded in `stripe_events`, so Stripe's redelivery is a `duplicate` and cannot bring it back, and the
+  tenant stays `past_due` with its grace window instead of `canceled`. The bound is the grace window: access ends at
+  `grace_until` (72 hours after the failure by default, `GRACE_PERIOD_HOURS`; a repeated failure does not extend it),
+  unless a newer subscription event changes the state first. It needs a failure created AFTER the cancel's own `created`
+  and applied before the cancel. Why the clock is shared: a subscription event older than an applied failure must stay
+  stale, so an older `updated(active)` cannot clear the grace window the failure opened. Why it is not fixed: applying
+  every `deleted` whatever `last_event_at` says would also apply a delete that really is old (the delete of an earlier
+  subscription, delivered after a newer subscribe event), and with one clock the code cannot tell the two apart. A fix
+  needs a second clock (a column for the last subscription event next to `last_event_at`), so that a `deleted` is judged
+  against the last subscription event only while an `updated(active)` is still judged against both; that is a design,
+  not built or tested. Pinned by `test_a_cancel_older_than_an_applied_payment_failure_is_stale_and_access_lasts_until_the_grace_ends`
+  in `tests/test_webhook_ties.py`, which a fix has to change on purpose.
 - **Concurrency is tested with threads in one process.** Multi-process behaviour (several uvicorn workers) is not tested; the
   per-tenant advisory lock and the row lock are what it relies on.
 - **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
