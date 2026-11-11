@@ -63,10 +63,14 @@ Each layer fails in a different way from the others. One example each.
   about who wrote it or why, described what they saw and tried to break the story (21:40). They found stale lines in the
   testing guide, one route (charges) that still took its database connection the way ingest had stopped doing (#38), and
   that the review evidence sat outside the repo, which the next change fixed (#39).
-- **A clean-clone run of the final code.** Dev A ran the shipped path from a clean clone at `e603a15` (start, demo,
-  outage check, flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with
-  `PGTZ=America/New_York`; 20:51). Dev B ran the suite from its own clean clone at the same commit and checked 40
-  citations and every link. The commits after it change documentation only.
+- **Clean-clone runs.** Earlier, Dev A ran the shipped path from a clean clone at `e603a15` (start, demo, outage check,
+  flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with `PGTZ=America/New_York`; 20:51).
+  Dev B ran the suite from its own clean clone at the same commit and checked 40 citations and every link. Code changed
+  after those runs: #38 (`a583885`, `05eec07`) changed the charges connection and its test, and `6eacf22` changed a
+  docstring in `app/db.py`. The final-code run was the lead's: from a clean clone of `dea36c8`, 610 tests, the demo and
+  the outage check passed (the first demo call came before the API was listening; the rerun passed, as
+  `docs/demo.md` says). The only change after `dea36c8` is `a2362ae`, documentation only. The flood, data-kept-across-
+  `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
 - **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
   was checked by a person reading the diff.
 
@@ -81,7 +85,7 @@ Each round's report, and the commit it tested, is in [docs/reviews/](reviews/REA
 | Round 3 (the new delete rule) | concurrency | 0 | 0 | 2 |
 | Claims, first pass (words against code) | claims | not counted | 0 | 9 |
 | Claims, re-check of the runbook, testing and demo pages | claims | not counted | 0 | 0 |
-| Claims, final check at `e603a15` | claims | not counted | 0 | 1 |
+| Claims, final check (before #38) at `e603a15` | claims | not counted | 0 | 1 |
 
 The reports also list notes, not counted here. The claims reports count major and minor only.
 

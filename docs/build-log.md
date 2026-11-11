@@ -254,7 +254,8 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   now sets the session zone to UTC in the statement that sets the statement timeout (#34). The ten new tests failed on the old
   code for the stated reasons, the whole suite passes unchanged under both zones, and the old limit paragraph in
   `docs/billing.md` was rewritten.
-- **20:44 to 20:53** Final checks on the code as merged at `e603a15` (the commits after it change documentation only). Dev A
+- **20:44 to 20:53** Final checks on the code as merged at `e603a15` (when this was written, the commits after it changed
+  documentation only; #38 changed code later, see 21:36 to 22:05). Dev A
   ran the shipped path from a clean clone: start, demo, outage check, flood, data kept across `down` and `up`, emptied by
   `down -v`, 601 tests, and 601 again under a New York session zone. Dev B ran the same suite from its own clean clone, 40
   citations and every link. The claims lane's final check found 0 major and 1 minor (the build log said a script checked
@@ -277,5 +278,6 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   and made the repo public on 2026-11-10 at about 22:25 CST. The state of main at this entry is `dea36c8`. The lead ran,
   from a clean clone of `dea36c8`, the 610 tests, the demo and the outage check, and all passed. The first demo call came
   before the API was listening ([the demo guide](demo.md) says to give it a few seconds); the rerun passed.
+  This is the run of the final code; the `e603a15` runs came before #38.
   The platform adapter has never run against the live service: there was no API key, so it runs on recorded responses.
   No person has read the diff, and the operator's read of the money and entitlement code has not happened.

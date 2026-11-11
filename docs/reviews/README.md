@@ -21,7 +21,7 @@ was tried and held. Later rounds re-ran the earlier repros against the fixed cod
 | Operations, round 2 | [operations.md](operations.md) | `1abb7b4` | not stated | 2 | 2 (+1 note) | Re-run; the runbook run literally; counted from the headings, the report gives no total |
 | Claims, first pass | [claims.md](claims.md) | `843163a` (full SHA in the report) | not stated | 0 | 9 (+6 notes) | README and docs checked sentence by sentence against the code, from a clean clone |
 | Claims, re-check | [claims.md](claims.md) | `82bc2df` | not stated | 0 | 0 (+1 note) | The runbook, testing and demo pages, and one paragraph of the ingest page |
-| Claims, final check | [claims.md](claims.md) | `e603a15` | not stated | 0 | 1 (+2 notes) | The diff since `82bc2df`; name and secret sweeps of the tree and the history |
+| Claims, final check (before #38) | [claims.md](claims.md) | `e603a15` | not stated | 0 | 1 (+2 notes) | The diff since `82bc2df`; name and secret sweeps of the tree and the history |
 
 The first four lenses add up to the totals the README gives: round 1, 0 blockers, 9 major and 10 minor; round 2, 0 blockers,
 3 major and 7 minor. The claims lens did not count blockers.
