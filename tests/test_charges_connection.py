@@ -107,12 +107,13 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
     try:
         with TestClient(app) as shared, ThreadPoolExecutor(max_workers=60) as pool:
             senders = [pool.submit(shared.get, "/v1/tenants/tenant-1/charges", params=GOOD) for _ in range(60)]
-            seen = (-1, -1)
+            seen, steady = (-1, -1), 0
             for _ in range(600):                                     # until the number of stalled requests stops growing
                 time.sleep(0.05)
                 with lock:
                     now = (len(inside), open_connections(conn))
-                if now == seen and now[0] > 0:
+                steady = steady + 1 if now == seen and now[0] > 0 else 0
+                if steady >= 6:                                      # unchanged for 0.3 s: the pool is full
                     break
                 seen = now
             else:
