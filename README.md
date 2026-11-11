@@ -99,8 +99,10 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
 - Give the API a few seconds after `up -d`. A demo run before it listens prints `FAIL step 3 ... got 000`:
   run it again.
 - Postgres applies the files in `db/` only when its data volume is first created, so an existing or
-  half-built volume (for example after an interrupted first start) is not repaired. Run `docker compose down -v`
-  (it deletes the data) and start again.
+  half-built volume (for example after an interrupted first start, or after an upgrade that adds a column) is not
+  repaired by `up`. Every file in `db/` is repeatable and the image carries them, so apply them to the running stack
+  without losing data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`.
+  Only `docker compose down -v` resets the data (it deletes it).
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS` and `LOG_LEVEL` (default `INFO`; an invalid value falls back to it). To test against your own database:
