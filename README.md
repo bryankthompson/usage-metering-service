@@ -195,7 +195,7 @@ every unpriced model, a same-second event that could undo a cancel, a held lock 
 database that hung it too (connecting now ends in a 503 after 5 s; a freeze after connecting still hangs, see
 [docs/ingest.md](docs/ingest.md)), a request body buffered before the 401 (now capped), and one poisoned rollup hour that
 blocked every later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
-lane's own repros against the fixed code and attacked the fixes: 0 blockers, 3 major, 7 minor. Two majors became code
+lane's own repros against the fixed code and attacked the fixes: 0 blockers reported (the operations report gives no count), 3 major, 7 minor. Two majors became code
 changes (a cancel older than an applied payment failure was lost; the database lives in a named volume now, because
 `docker compose down` followed by `up` had started an empty one); one is written down with its bound in
 [docs/ingest.md](docs/ingest.md) (a database that freezes after the connection was made). The review reports are in

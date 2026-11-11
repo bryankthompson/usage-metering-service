@@ -92,7 +92,7 @@ Each round's report, and the commit it tested, is in [docs/reviews/](reviews/REA
 | Round | Lenses | Blocker | Major | Minor |
 |--|--|--|--|--|
 | Round 1 (on the first merged code) | money, concurrency, security, operations | 0 | 9 | 10 |
-| Round 2 (re-run repros, attack the fixes) | the same four | 0 | 3 | 7 |
+| Round 2 (re-run repros, attack the fixes) | the same four | 0 reported (operations gives no count) | 3 | 7 |
 | Round 3 (the new delete rule) | concurrency | 0 | 0 | 2 |
 | Claims, first pass (words against code) | claims | not counted | 0 | 9 |
 | Claims, re-check of the runbook, testing and demo pages | claims | not counted | 0 | 0 |

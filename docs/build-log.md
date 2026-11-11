@@ -210,7 +210,7 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 - **18:50** A slip on the lead's side: the DRC job for #21 named a base that the lane did not contain (the lane held an
   older main), and DRC refused it at intake. The lead merged main into the four waiting lanes and resent the job.
 - **19:12 to 19:23** Round two of the red-team: the four lenses re-ran their own repros against the fixed code and attacked
-  the fixes. 0 blockers. Fixed from it: model and tenant names in the reconcile report (#23). Written down as limits and not
+  the fixes. 0 blockers reported (the operations report gives no count). Fixed from it: model and tenant names in the reconcile report (#23). Written down as limits and not
   fixed: a charges range that cuts an hour, the 100-hour cap of `unclosed_hours` (no truncation flag), a frozen database
   mid-query, the exclusive lock during a very large close. The shared clock for invoice and subscription events (a cancel
   older than an applied payment failure was stale) was first written down as a limit and then fixed (see 19:40). Two of the three majors were then fixed in code: the
