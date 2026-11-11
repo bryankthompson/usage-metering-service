@@ -46,4 +46,7 @@ ISO 8601 UTC time. A final streaming chunk maps the same way. A missing or non-i
 - The response does not say which customer made the call, so the caller supplies the tenant.
 - Cached prompt tokens are counted inside `prompt_tokens` and billed at the full input price; this service has no
   cached-token price.
+- `live` calls the service before it posts usage, and nothing checks entitlement before that call. The edge controls recording
+  usage and reading charges, not serving inference: an unpaid or canceled tenant still gets the completion, its usage gets
+  402, `live` exits 1, and the usage is lost unless `--spool` was used. A real gate needs an entitlement-read endpoint, which does not exist.
 - The fixtures in `tests/fixtures/seekr_*.json` are hand-written from the documented schema, not recorded.

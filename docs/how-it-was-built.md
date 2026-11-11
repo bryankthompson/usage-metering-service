@@ -82,6 +82,7 @@ Each layer fails in a different way from the others. One example each.
   `docs/demo.md` says). No code changed after `dea36c8`: `git diff dea36c8 main -- app tests scripts compose.yaml
   Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
   `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
+  That statement is about `dea36c8` (2026-11-10); #45 and #46 changed code afterwards, and `docs/build-log.md` (2026-11-11) records them.
 - **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
   was checked by a person reading the diff.
 

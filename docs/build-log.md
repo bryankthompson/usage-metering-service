@@ -281,3 +281,21 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   This is the run of the final code; the `e603a15` runs came before #38.
   The platform adapter has never run against the live service: there was no API key, so it runs on hand-written fixtures.
   No person has read the diff, and the operator's read of the money and entitlement code has not happened.
+- **2026-11-11** Two more features merged, then a walk of the whole app. #45 `feat: optional ClickHouse mirror of closed
+  rollups, with backfill and reconcile export` merged at `91d0b05` (main `250b278`): `app/mirror.py`, the compose profile
+  `analytics`, [the ClickHouse guide](clickhouse.md). DRC reviewed three rounds (the third forced by the lead): QR-3, QR-4,
+  QR-5, QR-7 and QR-8 were folded in, the owed QR-1, QR-2 and QR-6 were fixed by the lane in `d144eff`, QR-9 was dismissed;
+  620 tests at `d144eff`. It was run by hand once on a real ClickHouse before the last two fix rounds; after that only
+  stand-in server tests ran. #46 `feat: scripts/up plays a three-tenant scenario...` merged at `1d0c3f5` (main `26540ac`):
+  `scripts/up`, `scripts/scenario.py`, `scripts/stand_in_inference.py` and an api healthcheck in `compose.yaml`. DRC
+  reviewed three rounds (the third forced): QR-1 to QR-4 were folded in, QR-5 was fixed by the lane in `1d0c3f5`, QR-6 to
+  QR-8 were dismissed with reasons; 633 tests at `1d0c3f5`. Its first CI run stayed "queued" with no jobs for 32 minutes;
+  closing and reopening the pull request started a new run, which passed. `scripts/up` on merged main took 13.1 s (compose up
+  9.6 s, scenario 3.3 s); an earlier run on the lane head took 25.7 s with a cold image build. The charges matched the
+  script's own arithmetic (6038 and 5584 micro-USD) and reconcile drift was 0. Dev B then walked the whole app on `250b278`
+  with its own ports and database: the demo, the flood (600 requests, 150 clients), the outage check, 55 of 56 README
+  status-code probes (the miss was its own probe), ClickHouse drift, backfill and outage recovery, and 620 tests. It found
+  four documentation gaps (the start-up wait, the nesting depth behind the 400, the adapter's error for embeddings without
+  `--model`, two items numbered 8), fixed in the `lane/doc-gaps` change. Still true: no call to the real service has been made
+  (there is no key; access is gated behind "request access or contact sales"), `--live` has never run, and no person has
+  read the whole diff.

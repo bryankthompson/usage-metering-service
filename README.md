@@ -22,7 +22,8 @@ different payload: **409**. Body `tenant_id` is not the
 tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**: an oversized
 `Content-Length` is rejected immediately; otherwise streamed chunks are counted and the request is rejected as soon as
 they pass the cap, without buffering the rest (also with no credentials). A body the server cannot parse at all (for
-example JSON nested thousands deep): **400**.
+example JSON nested very deep: measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400 from about
+10,077, so the boundary lies between those two numbers): **400**.
 
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the
@@ -96,7 +97,7 @@ with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`
 (`docker compose --profile analytics`); a failure there is logged and never touches the bill, `python -m app.mirror --backfill`
 recovers it, and `--export-actuals` feeds `app.reconcile --actuals` ([docs/clickhouse.md](docs/clickhouse.md)). It is a derived copy, not the bill.
 
-**8. A platform adapter, not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
+**9. A platform adapter, not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
 response (chat, embeddings or the final stream chunk) into one usage event, with the response id as the idempotency key; a
 missing usage raises and is never counted as zero. It was built from the public API documentation and tested with
 hand-written fixtures, the real app and a local stand-in server. No call to the real service has been made: there is no key.
@@ -116,7 +117,7 @@ Any route: **404** for an unknown path and **405** for a wrong method.
 ## Run it
 
 ```bash
-docker compose up -d --build   # Postgres 16, the API on 127.0.0.1:8000 and the hourly rollup service
+docker compose up -d --build --wait   # Postgres 16, the API on 127.0.0.1:8000 and the hourly rollup service
 scripts/demo.sh                # an end-to-end run against that stack (needs curl and python3)
 scripts/test                   # runs the tests against a Postgres 16 container it starts in docker
 ```
@@ -125,8 +126,10 @@ The API and database ports listen on 127.0.0.1 only (`API_PORT` and `DB_PORT` ch
 unprivileged user. If something fails while it runs, start at [docs/runbook.md](docs/runbook.md). The demo prices a
 model, sends a locally signed subscription event, posts usage (with a resend), closes the hour with the rollup
 and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo.md). Two things to know:
-- Give the API a few seconds after `up -d`. A demo run before it listens prints `FAIL step 3 ... got 000`:
-  run it again.
+- Wait for the API before you use it. `docker compose up -d --build --wait` (and `scripts/up`) return when the api
+  answers its healthcheck; a plain `up -d` returns before the api answers, so a
+  run that starts too early fails: `scripts/demo.sh` prints `FAIL step 3 ... got 000`, and `scripts/flood.py` hit a
+  `ConnectionResetError` on a first start. Run it again once the api answers.
 - Postgres applies the files in `db/` only when its data volume is first created, so an existing or
   half-built volume (for example after an interrupted first start, or after an upgrade that adds a column) is not
   repaired by `up`. Every file in `db/` is repeatable and the image carries them, so apply them to the running stack
@@ -135,7 +138,7 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   `docker compose down -v` resets it (it deletes it). A stack started before the volume was named keeps its old data in an
   anonymous volume: dump it with `pg_dump --data-only` before switching ([docs/demo.md](docs/demo.md)).
 
-The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). Settings the code reads:
+The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). It sits in this public repo, so anyone who reads it could sign a webhook for a stack run as it is: never expose such a stack. Settings the code reads:
 `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS` and `LOG_LEVEL` (default `INFO`; an invalid value falls back to it). To test against your own database:
 `DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
 on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
@@ -149,6 +152,9 @@ A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md
 - Any call to the inference platform the adapter is written for (no key), and its per-model prices: the prices in the tests are illustrative.
 - Cluster manifests, a dashboard, late adjustments and the other items listed in [docs/design-notes.md](docs/design-notes.md).
 - Pushing usage to Stripe, invoices, or any call to Stripe.
+- Gating inference: the edge controls recording usage and reading charges, not serving inference. `seekrflow live` calls the
+  service first and posts the usage after, so an unpaid or canceled tenant still gets the completion; its usage then gets 402,
+  `live` exits 1, and the usage is lost unless `--spool` was used. A real gate needs an entitlement-read endpoint, which does not exist.
 - Real authentication: the tenant comes from the `X-Tenant-Id` header, which anyone can send.
 - A test-mode guard: `livemode` is never read, so the service is test-mode only because the compose file sets a
   fake webhook secret.
