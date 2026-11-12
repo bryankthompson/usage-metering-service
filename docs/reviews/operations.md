@@ -60,6 +60,7 @@ caller. Fix: cap `end - start` (for example 366 days) with a 422, or paginate.
 File: app/rollup.py:42-48. `date_trunc(...) + interval <= cutoff` is not index-friendly. With 9.3M rows the query takes 1.96 s
 (`EXPLAIN ANALYZE` Execution Time: 1961.913 ms, seq/index-only scan of everything) and it grows linearly with history, every hour, forever.
 Fix: restrict to `occurred_at < cutoff - 1 hour` and `occurred_at >= (select max(hour_start) from closed_hours) - something`, or start from the oldest unclosed hour.
+> Note, 2026-11-11: fixed differently: `DUE_HOURS` is now a recursive CTE that walks only the hours that have events, one `(occurred_at)` index probe per hour (27 ms against 647 ms on 1.2M events), so the cost grows with hours, not events; see "Query cost" in docs/ingest.md.
 
 ## RT-operations-7  NOTE  Events retried after their hour closed are unbilled, with a 201
 The close runs 5 min to ~65 min after the hour ends (the loop sleeps 3600 s from the end of the previous run, not on the hour). A

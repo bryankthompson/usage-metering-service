@@ -8,7 +8,7 @@ and tied to the line in the existing code where it would attach. The "estimate" 
 The rule: write the fact down first, derive everything else from it, and when unsure, deny.
 
 - **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:23-32`, function `usage_events_append_only`).
-- **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:30-37`) and `app.reconcile`
+- **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
 - **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
   the INSERT inside `add_price_version`, `app/pricing.py:55-56`; the function starts at :44). Money is integer micro-USD (`docs/billing.md`).
@@ -19,8 +19,8 @@ The rule: write the fact down first, derive everything else from it, and when un
 **A queue or stream in front of ingest.** The seam is the single `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
 (`INSERT_EVENT`, `app/ingest.py:59-66`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
 changes: `POST /v1/usage` would publish and answer once the broker has the message, so a 201 would mean "queued", not "stored"
-(today 201 means committed, `_store`, `app/ingest.py:139-144`), and the `late` flag could not be returned to the caller. What stays: the log,
-the shared hour lock taken by the consumer (`lock_hour_shared`, `app/ingest.py:141`) and the rollup. The 422 checks (`tenant_id`, `idempotency_key` and `model` capped at 200 characters, `MAX_TEXT` at `app/ingest.py:53` and the `Text` type at `:81`) would have to
+(today 201 means committed, `_store` in `app/ingest.py`), and the `late` flag could not be returned to the caller. What stays: the log,
+the shared hour lock taken by the consumer (`lock_hour_shared`, called in `_store`) and the rollup. The 422 checks (`tenant_id`, `idempotency_key` and `model` capped at 200 characters, `MAX_TEXT` at `app/ingest.py:53` and the `Text` type at `:81`) would have to
 run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
@@ -59,7 +59,7 @@ provider today (`README.md`, "Not built").
 
 | Decision | Why | Cost |
 |--|--|--|
-| Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`hour_index` and the exclusive lock in `close_hour`, `app/rollup.py:49-51,74-78`; the shared lock in `_store`, `app/ingest.py:139-141`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
+| Advisory lock per hour instead of a queue | Ingest holds a shared lock, close takes the exclusive one, so each event is in the closed rollup or flagged late, never both and never neither (`hour_index` and the exclusive lock in `close_hour`, `app/rollup.py`; the shared lock, `lock_hour_shared` in `app/rollup.py`, called in `_store` in `app/ingest.py`). The lead answered the dev's design question this way (`docs/build-log.md`, 15:27). | Ingest and close share one Postgres; a close waits for in-flight inserts. |
 | Late events flagged and never billed, instead of reopening a closed hour | A closed hour's usage never changes, so the same price versions give the same bill. A price version back-dated into a closed hour changes a recomputed charge (`docs/billing.md`). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
 | Grace counted from the first failure that arrives | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). It is Stripe's first failure only when delivery order equals creation order. |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
