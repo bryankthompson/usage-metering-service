@@ -20,6 +20,7 @@ from psycopg_pool import PoolTimeout, TooManyRequests
 from app import db, edge
 from app.edge import require_entitlement
 from app.main import app
+from tests.conftest import own_pool_sessions
 from tests.test_attack_ingest import event
 
 DEADLINE_S = 60
@@ -48,17 +49,6 @@ def post(client, key, **changes):
 def stored(conn) -> int:
     conn.commit()
     return conn.execute("SELECT count(*) AS n FROM usage_events").fetchone()["n"]
-
-
-def own_pids(*connections) -> list[int]:
-    return [c.info.backend_pid for c in connections]
-
-
-def backends_other_than(observer, *mine) -> int:
-    return observer.execute(
-        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()" " AND NOT (pid = ANY(%s))",
-        (own_pids(observer, *mine),),
-    ).fetchone()["n"]
 
 
 # --- the library's error classes, on the installed version -----------------------------------------------------------
@@ -136,7 +126,7 @@ def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn
 
     def sample():
         while not done.is_set():
-            peak[0] = max(peak[0], backends_other_than(sampler, conn))
+            peak[0] = max(peak[0], own_pool_sessions(sampler))
             time.sleep(0.002)
 
     watcher = threading.Thread(target=sample)
@@ -152,9 +142,7 @@ def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn
         finally:
             done.set()
             watcher.join()
-        pooled = sampler.execute(
-            "SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s", (db.APPLICATION_NAME,)
-        ).fetchone()["n"]
+        pooled = own_pool_sessions(sampler)
     finally:
         sampler.close()
     assert statuses == [201] * 200

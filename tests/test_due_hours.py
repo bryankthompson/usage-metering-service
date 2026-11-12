@@ -309,6 +309,28 @@ def test_the_tenant_and_time_index_exists_and_the_time_index_is_kept(conn):
     )  # AGGREGATE_HOUR and DUE_HOURS use it
 
 
+def test_charge_rows_for_one_tenant_use_the_hour_range_index(conn):
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " SELECT 'tenant-1', 'm' || m, %s + h * interval '1 hour', 1, 1, 1 FROM generate_series(1, 5) m, generate_series(0, 99) h",
+        (utc(2026, 1, 1),),
+    )
+    conn.execute("ANALYZE usage_rollups_hourly")
+    conn.commit()
+    indexes = conn.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'usage_rollups_hourly_tenant_hour'")
+    assert indexes.fetchone()["indexdef"].endswith("USING btree (tenant_id, hour_start, model)")
+    conn.execute("SET enable_seqscan = off")
+    params = {
+        "tenant": "tenant-1",
+        "start": utc(2026, 1, 2),
+        "end": utc(2026, 1, 3),
+        "after_hour": None,
+        "after_model": None,
+    }
+    nodes = plan_nodes(conn, pricing.CHARGE_ROWS, params)
+    assert "usage_rollups_hourly_tenant_hour" in {n.get("Index Name") for n in nodes}, [n["Node Type"] for n in nodes]
+
+
 def test_applying_the_schema_again_changes_no_index(conn):
     before = usage_event_indexes(conn)
     db.apply_schema(conn)

@@ -51,7 +51,7 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   (opaque text) when more follow, `null` on the last page. Send it back as `cursor` with the same `limit`, tenant, `start` and
   `end` for the next page. A `cursor` without a `limit` is 422, and so is a malformed one or one made for another tenant or range
   (`foreign cursor`; the same instant spelled in another UTC offset is the same range). Order is the database's (`model` is
-  compared only in SQL, with the column collation), so `Zebra` follows `apple`.
+  compared only in SQL, with the column collation), so `Zebra` follows `apple`. The order of lines in a bill follows the cluster's collation.
 - **All or nothing, on every page.** Each request rates every row of the range, so a missing price anywhere is a 409 on page 1,
   before any line is returned.
 - **The client rule.** Every page reports the whole range's `total_micros` as of its own request (it can differ between requests if hours close meanwhile): never add the totals of the pages (that bills the
