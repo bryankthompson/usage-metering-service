@@ -5,7 +5,6 @@ shared clock as before."""
 import pytest
 from fastapi.testclient import TestClient
 
-from app import edge
 from app.main import app
 from tests.stripe_signing import SECRET, payment_failed_event, subscription_event
 from tests.test_webhooks import T, at, post, row

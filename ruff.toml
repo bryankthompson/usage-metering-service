@@ -1,0 +1,7 @@
+# Lint only: F (pyflakes: unused imports and names, undefined names) and E9 (syntax errors).
+# No formatter and no type checker yet; they are a later PR (the counts are in the PR text of the ci-gates change).
+# CI and pre-commit both run the pinned ruff 0.8.6, so this file is the only config.
+[lint]
+select = ["F", "E9"]
+# B (bugbear) is not selected: 11 hits today, all B023 in tests (loop variables in closures), not worth a mass edit here.
+# If B is added later, ignore B008 for FastAPI `Depends(...)` defaults.

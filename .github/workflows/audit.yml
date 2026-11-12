@@ -1,0 +1,22 @@
+name: audit
+# pip-audit of the locked dependencies. Not a required check on pull requests: a new advisory would block unrelated work.
+# It runs weekly, by hand, and when the lock or the dependency list changes. A red run is a finding to read, not a merge gate.
+# Result on 2026-11-11: no known vulnerabilities.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [uv.lock, pyproject.toml]
+  pull_request:
+    paths: [uv.lock, pyproject.toml]
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv export --frozen --no-emit-project -o requirements-audit.txt
+      - run: uvx pip-audit@2.10.1 --strict --no-deps --disable-pip -r requirements-audit.txt
