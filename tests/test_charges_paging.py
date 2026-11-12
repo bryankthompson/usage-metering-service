@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app import db, pricing
 from app.edge import require_entitlement
 from app.main import app
+from tests.conftest import own_pool_sessions
 from app.pricing import NoPrice, add_price_version
 
 T0 = datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc)
@@ -418,13 +419,6 @@ def test_the_unclosed_hours_list_says_when_it_was_cut(client, conn, hours, trunc
 # --- the deadline ---------------------------------------------------------------------------------------------------------
 
 
-def in_transaction(conn):
-    return conn.execute(
-        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
-        " AND state LIKE 'idle in transaction%'"
-    ).fetchone()["n"]
-
-
 @pytest.mark.parametrize("params", [{"limit": 5}, {}], ids=["paged", "unpaged"])
 def test_a_pass_past_the_request_deadline_is_504_and_releases_its_connection(client, conn, monkeypatch, params):
     add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
@@ -444,7 +438,9 @@ def test_a_pass_past_the_request_deadline_is_504_and_releases_its_connection(cli
     assert time.monotonic() - started < 3  # 20 rows x 50 ms would be 1 s: it stopped at 0.3 s
     stats = db._request_pool().get_stats()  # the connection went back to the pool (which keeps it open)
     assert stats["pool_size"] - stats["pool_available"] == 0
-    assert in_transaction(conn) == 0  # and went back with its transaction rolled back
+    assert (
+        own_pool_sessions(conn, state_like="idle in transaction%") == 0
+    )  # and went back with its transaction rolled back
 
 
 # --- memory ---------------------------------------------------------------------------------------------------------------
