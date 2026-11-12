@@ -31,8 +31,7 @@ flowchart LR
 ## How it was built
 
 The operator designed the process that made AI-written code mergeable, and this section is the record of what that process
-caught and missed. Models wrote and reviewed the code, and the operator is not a coder, so this is not the operator vouching
-for the code.
+caught and missed. Models wrote and reviewed the code; the operator designed and ran the method around them.
 
 The method: one brief per job that fixed which files it could touch; a review desk (DRC) that reads each change and cannot
 merge; a merge command that refuses without a review receipt for the branch, a head that contains the latest `main` and
