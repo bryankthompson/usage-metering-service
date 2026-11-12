@@ -152,6 +152,10 @@ body, or `occurred_at` not ISO text), 413 (body over 64 KiB: step 12), or an edg
     WARNING:  usage conflict: tenant=demo-... key='late-1' reused with a different payload (event_id=4)
     WARNING:  usage rejected: body tenant 'lapsed-co' is not the entitled tenant 'demo-...'
     2026-11-11 01:11:02,586 WARNING app.edge edge denied: tenant='gone-co' status=402 reason=not entitled: status canceled
+`POST /v1/usage/batch` stores all of its events or none, so after a non-2xx answer the database refused it and none of that batch is in the table; the whole
+batch can be resent. If the connection drops while the commit or the response is in flight, the batch may be stored though the client saw no answer: resend it, the dedupe returns it as duplicates. Its 201 or 200 carries one result per event (`status`, `event_id`, `late`), and its log lines are
+`usage batch: tenant=... events=N accepted=N duplicate=N` (INFO) and `usage batch conflict:` / `usage batch rejected:` (WARNING; the 403
+and 409 details name the index, `events[i]`).
 Missing: no row, so it was never accepted; ask the client for the status it saw. The hour is the UTC hour of `occurred_at`,
 not `received_at`. Doubled: the service dedupes only on (tenant, key); two keys for one real call are two events. Look-alikes:
 
@@ -255,7 +259,7 @@ Keepalive options do not end it (measured, `docs/ingest.md`). Fix: `docker compo
 within seconds and can be resent. Or `docker compose restart api` (about 5 s): the parked requests are dropped, and new ones get
 503 `entitlement check unavailable` after about 5 s (7.9 s with 50 clients retrying, walk on 5dca15d) until the db is back. Both measured with a paused db and 50 requests in flight.
 
-## 12. 413 on /v1/usage
+## 12. 413 on /v1/usage and /v1/usage/batch
     python3 -c "print('x'*70000)" | curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @- | sed -n '1p;$p'
     HTTP/1.1 413 Request Entity Too Large
     {"detail":"request body too large"}
@@ -264,7 +268,8 @@ within seconds and can be resent. Or `docker compose restart api` (about 5 s): t
 the rest. This happens before any credential check, so a caller with no `X-Tenant-Id` gets 413 too. An event is a few
 hundred bytes, so a 413 is a client sending the wrong thing or a batch: look at the client, not the service. The access
 line is `"POST /v1/usage HTTP/1.1" 413` in
-`docker compose logs api`. The webhook has its own limit (1 MiB, `webhook body too large`, step 8).
+`docker compose logs api`. `/v1/usage/batch` has its own cap, 7,363,012 bytes (1000 maximal events), answered the same way, so there a
+413 means a body of far more than a real batch carries, or padding. The webhook has its own limit (1 MiB, `webhook body too large`, step 8).
 
 ## Symptoms at a glance
 | Symptom | Most likely cause | Look at |
@@ -279,9 +284,11 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
 | 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying | 11 |
-| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included | 11 |
+| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included; on `/v1/usage/batch` also many hours (each lock wait up to 2 s) or very long, near-identical text fields | 11 |
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
+| 413 on `/v1/usage/batch` | request body over 7,363,012 bytes | 12 |
+| 422 on `/v1/usage/batch` | an invalid event (`loc` names the index), no events, over 1000 events, or over 48 UTC hours | 7 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |
 | `reconcile` exits 1 | drift (rollup table changed outside `app.rollup`, or the other source differs), or `--fail-on-unbilled` | 4 |
 | Tenant paid but still denied | only a `customer.subscription.*` event reopens access; `invoice.paid` does not | 8 |
