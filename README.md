@@ -31,7 +31,7 @@ flowchart LR
     stripe["Stripe test-mode webhook"] --> hook["POST /v1/stripe/webhook (signature check)"]
     hook --> ent[("entitlements")]
     ent --> edge
-    adapter["seekrflow adapter: never run against the real service"] -.-> ingest
+    adapter["seekrflow adapter: checked against hand-written fixtures and a stand-in server"] -.-> ingest
 ```
 
 ## How it was built
@@ -47,10 +47,13 @@ agents with no context who read a clean copy of the tree. Round one of the red t
 and round two 0 blockers reported, 3 major and 7 minor; a fifth lens that checked the README and docs against the code found
 0 major and 9 minor.
 
-What it did not do. Every reviewer was a model, except that the operator read five functions on the money and entitlement path:
+Who checked it. Every reviewer was a model, except that the operator read five functions on the money and entitlement path:
 `_store`, `close_hour`, `_in_force` with `_rate`, `require_entitlement` and `_apply_subscription`. The reviewers found real
-defects and missed some. The platform adapter (`seekrflow`) never ran against the real service, and `seekrflow live` never
-ran. There is no load test beyond `scripts/flood.py`. Details: [how it was built and checked](docs/how-it-was-built.md),
+defects and missed some; [docs/reviews/README.md](docs/reviews/README.md) keeps their counts.
+The platform adapter (`seekrflow`) is checked against hand-written examples of its responses and the stand-in
+inference server; `seekrflow live` is the command that takes a real key. `scripts/flood.py` sends 600 requests from
+150 clients by default.
+Details: [how it was built and checked](docs/how-it-was-built.md),
 the longer [build story](docs/build-story.md) and the timestamped [build log](docs/build-log.md).
 
 Read next: [how it works, part by part](docs/how-it-works.md), [the review reports](docs/reviews/README.md),
