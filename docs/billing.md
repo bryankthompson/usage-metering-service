@@ -117,6 +117,15 @@ It opens its own database connection (one extra per request), so a database that
 | `past_due` | allowed while `now <= grace_until`; 402 after, or with no `grace_until` |
 | database error | 503, never allowed |
 
+`entitlements.status` holds only `active`, `past_due` or `canceled`: the table has a CHECK constraint
+(`entitlements_status_check`) and the database refuses any other value. `apply_schema` adds the constraint to a database
+created before it existed, once (a second run does nothing). A legacy row outside the three values makes `apply_schema`
+fail at that step; find such rows first with:
+
+    SELECT tenant_id, status FROM entitlements WHERE status NOT IN ('active','past_due','canceled');
+
+The edge still answers 402 for any other status it might read (the test stubs the row, since the table cannot hold one).
+
 ## Logging
 Every webhook outcome is one INFO line in the container log (`docker compose logs api`):
 `webhook processed|duplicate|stale|ignored: event='evt_...' type='...' tenant='...'`, with the ids quoted (`%r`) so a newline in
