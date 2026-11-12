@@ -21,6 +21,7 @@ import sys
 from datetime import datetime, timezone
 
 import psycopg
+from psycopg.rows import DictRow
 
 from app import db
 
@@ -189,7 +190,7 @@ def not_billed_lines(not_billed: dict) -> list[str]:
 
 
 def run(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[DictRow],
     since: datetime | None,
     only: datetime | None,
     actuals: dict | None,

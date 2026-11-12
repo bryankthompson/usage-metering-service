@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import psycopg
+from psycopg.rows import DictRow
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
@@ -103,11 +104,11 @@ def _tenant_id(value: object) -> str | None:
     return None if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text) else text
 
 
-def _lock_entitlement(conn: psycopg.Connection, column: str, value: str) -> dict | None:
+def _lock_entitlement(conn: psycopg.Connection[DictRow], column: str, value: str) -> dict | None:
     return conn.execute(f"SELECT * FROM entitlements WHERE {column} = %s FOR UPDATE", (value,)).fetchone()
 
 
-def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
+def _apply_subscription(conn: psycopg.Connection[DictRow], event: dict, created: datetime) -> tuple[str, str | None]:
     sub = event["data"]["object"]
     metadata = sub.get("metadata")
     raw_tenant = metadata.get("tenant_id") if isinstance(metadata, dict) else None
@@ -200,7 +201,7 @@ def _apply_subscription(conn: psycopg.Connection, event: dict, created: datetime
     return "processed", tenant_id
 
 
-def _apply_payment_failed(conn: psycopg.Connection, event: dict, created: datetime) -> tuple[str, str | None]:
+def _apply_payment_failed(conn: psycopg.Connection[DictRow], event: dict, created: datetime) -> tuple[str, str | None]:
     customer = _text(event["data"]["object"].get("customer"))
     row = _lock_entitlement(conn, "stripe_customer_id", customer) if customer else None
     if row is None:
@@ -240,7 +241,7 @@ HANDLERS = {
 }
 
 
-def handle_event(conn: psycopg.Connection, event: dict) -> str:
+def handle_event(conn: psycopg.Connection[DictRow], event: dict) -> str:
     """Apply one verified event in the open transaction and return its outcome. The caller commits or rolls back."""
     try:
         if not isinstance(event["id"], str) or not isinstance(event["type"], str):

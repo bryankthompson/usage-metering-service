@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 import psycopg
+from psycopg.rows import DictRow
 
 from app import db, mirror
 
@@ -70,7 +71,7 @@ def hour_index(ts: datetime) -> int:
     return (ts - EPOCH) // HOUR
 
 
-def lock_hour_shared(conn: psycopg.Connection, ts: datetime) -> None:
+def lock_hour_shared(conn: psycopg.Connection[DictRow], ts: datetime) -> None:
     """Ingest takes this before its INSERT. Many ingests share it; `close_hour` waits for all of them."""
     conn.execute("SELECT pg_advisory_xact_lock_shared(%s, %s)", (HOUR_LOCK_CLASS, hour_index(ts)))
 
@@ -81,7 +82,7 @@ def _require_aware(ts: datetime, name: str) -> None:
 
 
 def close_hour(
-    conn: psycopg.Connection, hour_start: datetime, defer_mirror: list | None = None
+    conn: psycopg.Connection[DictRow], hour_start: datetime, defer_mirror: list | None = None
 ) -> tuple[int, int] | None:
     """Close one UTC hour. Returns (rollup rows written, events counted), or None if it was already closed.
 
@@ -115,11 +116,11 @@ def close_hour(
 
 
 def close_due_hours(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[DictRow],
     now: datetime,
     grace: timedelta = DEFAULT_GRACE,
     failed: list[datetime] | None = None,
-    reconnect: Callable[[], psycopg.Connection] | None = None,
+    reconnect: Callable[[], psycopg.Connection[DictRow]] | None = None,
 ) -> list[tuple[datetime, int, int]]:
     """Close every unclosed hour with events that ended at least `grace` before `now`, oldest first.
 
@@ -175,7 +176,7 @@ def close_due_hours(
     return closed
 
 
-def _connect() -> psycopg.Connection:
+def _connect() -> psycopg.Connection[DictRow]:
     return db.connect(statement_timeout_ms=0)  # no statement timeout: a large hour legitimately takes long
 
 
