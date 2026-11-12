@@ -88,8 +88,12 @@ in `json.dumps` spacing. A body one byte over is a 413; padding such as extra fr
 **Memory of one maximal request (measured 2026-11-11).** One request carrying exactly 7,363,012 bytes (1000 maximal events), sent through the real app with
 `TestClient`, parsed and validated (1000 `UsageEvent` objects) and stopped by a 403 tenant mismatch on the first event (the edge replaced by a fixed tenant, so no
 database work), peaked at 17.0 MiB of Python allocations (`tracemalloc`, peak above the baseline, three runs, 17.0 MiB each; about 2.4 times the body). The peak
-includes the test client's own copy of the body, so the server's share is somewhat lower. Times 40 (the anyio worker threads, all
-holding such a request at once) that is 680 MiB (0.66 GiB), the worst case for memory held by request bodies. It is the measured peak of one request multiplied, not a measurement of 40 concurrent requests.
+includes the test client's own copy of the body, so the server's share is somewhat lower.
+That is one request's peak, and it is not a bound on the service. FastAPI reads the body and parses the JSON in the event loop (`await request.body()`,
+`fastapi/routing.py`), before the entitlement check and before the request goes to a worker thread. So every request in flight holds its body, and every
+request queued for a worker thread holds its parsed events: the 40 worker threads do not limit it. The memory is about 17 MiB times the number of such requests in flight, and
+the app does not bound that number (uvicorn's connection limit and a proxy in front are the only bounds). For example, 40 such requests would hold about 680 MiB, but
+that is an illustration, not a measurement and not a maximum. The same holds for the single route at its 64 KiB cap, with a much smaller figure per request.
 
 **Measured (2026-11-11, Postgres 16 in a container on a WSL2 laptop; times move with the machine, no throughput claim).**
 - Validating the body (pydantic plus the checks above, no database) took about 1.5 ms for 1000 ordinary events and about 3 ms for 1000
