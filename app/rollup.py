@@ -143,7 +143,7 @@ def close_due_hours(
     hours = [r["hour_start"] for r in conn.execute(DUE_HOURS, {"cutoff": now - grace}).fetchall()]
     conn.commit()
     closed = []
-    to_mirror = []  # (hour, rows) of the hours closed here, mirrored after the loop
+    to_mirror: list[tuple[datetime, list[dict]]] = []  # (hour, rows) of the hours closed here, mirrored after the loop
     opened = None  # the connection last obtained from `reconnect`, which this function must close
 
     def fail(hour: datetime, err: Exception) -> None:

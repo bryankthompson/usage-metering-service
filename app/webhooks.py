@@ -165,7 +165,7 @@ def _apply_subscription(conn: psycopg.Connection[DictRow], event: dict, created:
     status = (
         "canceled"
         if event["type"] == "customer.subscription.deleted"
-        else STATUS_MAP.get(raw_status if isinstance(raw_status, str) else None, "canceled")
+        else STATUS_MAP.get(raw_status if isinstance(raw_status, str) else None, "canceled")  # type: ignore[arg-type]  # the None key is a miss that falls to "canceled"
     )
     items, price = sub.get("items"), None
     data = items.get("data") if isinstance(items, dict) else None

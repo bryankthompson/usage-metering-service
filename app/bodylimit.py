@@ -8,7 +8,7 @@ body that sends no (or a wrong) Content-Length, so memory stays near the cap. Th
 
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 TOO_LARGE = "request body too large"
 
@@ -45,7 +45,7 @@ class BodyLimit:
             return
         seen = 0
 
-        async def counted() -> dict:
+        async def counted() -> Message:
             nonlocal seen
             message = await receive()
             if message["type"] == "http.request":

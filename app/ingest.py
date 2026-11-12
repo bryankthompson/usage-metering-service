@@ -177,18 +177,18 @@ def _store(
             "usage conflict: tenant=%s key=%r reused with a different payload (event_id=%s)",
             tenant,
             event.idempotency_key,
-            existing["id"],
+            existing["id"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
         )
         raise HTTPException(status_code=409, detail="idempotency_key was already used with a different payload")
     log.info(
         "usage duplicate: tenant=%s key=%r event_id=%s late=%s",
         tenant,
         event.idempotency_key,
-        existing["id"],
-        existing["late"],
+        existing["id"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
+        existing["late"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
     )
     response.status_code = 200
-    return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}
+    return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
 
 
 # --- POST /v1/usage/batch -------------------------------------------------------------------------------------------

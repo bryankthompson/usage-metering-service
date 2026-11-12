@@ -118,10 +118,10 @@ def read_actuals(path: str) -> dict[tuple[str, str, datetime], tuple[int, int]]:
         for key in ("tokens_in", "tokens_out"):
             if type(row[key]) is not int or row[key] < 0:
                 raise BadInput(f"{where}: {key} must be an integer of 0 or more")
-        key = (row["tenant_id"], row["model"], parse_hour(row["hour"], f"{where}: hour"))
-        if key in actuals:
+        actual_key = (row["tenant_id"], row["model"], parse_hour(row["hour"], f"{where}: hour"))
+        if actual_key in actuals:
             raise BadInput(f"{where}: repeats tenant_id, model and hour of an earlier line")
-        actuals[key] = (row["tokens_in"], row["tokens_out"])
+        actuals[actual_key] = (row["tokens_in"], row["tokens_out"])
     return actuals
 
 

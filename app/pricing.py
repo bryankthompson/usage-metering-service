@@ -72,12 +72,12 @@ def add_price_version(
     log.info(
         "price version added: model=%r version=%s effective_from=%s in=%s out=%s",
         model,
-        row["version"],
+        row["version"],  # type: ignore[index]  # INSERT ... SELECT with an aggregate always returns one row
         effective_from.isoformat(),
         input_micros_per_1k,
         output_micros_per_1k,
     )
-    return row["version"]
+    return row["version"]  # type: ignore[index]  # same row: always one
 
 
 def price_at(conn: psycopg.Connection[DictRow], model: str, at: datetime) -> dict:
