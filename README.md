@@ -18,9 +18,10 @@ flowchart LR
     rollup --> closed[("closed_hours")]
     rollup -.->|optional| ch[("ClickHouse mirror")]
     rollups --> charges["GET /v1/tenants/{tenant_id}/charges"]
-    closed --> charges
+    closed -.->|unclosed hours| charges
+    events -.->|unclosed hours| charges
     prices[("price versions")] --> charges
-    edge --> charges
+    edge -->|allowed| charges
     stripe["Stripe test-mode webhook"] --> hook["POST /v1/stripe/webhook (signature check)"]
     hook --> ent[("entitlements")]
     ent --> edge
