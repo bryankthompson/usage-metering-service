@@ -4,6 +4,7 @@ The fixtures in tests/fixtures/seekr_*.json are HAND-WRITTEN from the public doc
 recorded from the service: no call to it has been made. fetch_chat is exercised only against a stand-in
 http.server on 127.0.0.1. Prices used here are ILLUSTRATIVE, not the platform's.
 """
+
 import json
 import threading
 from datetime import datetime, timezone
@@ -21,20 +22,27 @@ from app.seekrflow import MissingUsage, fetch_chat, post_usage, usage_event
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TENANT = "tenant-1"
-HOUR = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)   # every fixture's `created` falls in this UTC hour
+HOUR = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)  # every fixture's `created` falls in this UTC hour
 
 
 def load(name):
     return json.loads((FIXTURES / name).read_text())
 
 
-CHAT, CACHED, EMB, CHUNK = (load(f"seekr_{n}.json") for n in ("chat", "chat_cached", "embeddings", "stream_final_chunk"))
+CHAT, CACHED, EMB, CHUNK = (
+    load(f"seekr_{n}.json") for n in ("chat", "chat_cached", "embeddings", "stream_final_chunk")
+)
 
 
 def test_chat_maps_to_one_event():
     assert usage_event(CHAT, TENANT) == {
-        "tenant_id": TENANT, "idempotency_key": "chatcmpl-hand-0001", "model": "meta-llama/Llama-3.1-8B-Instruct",
-        "tokens_in": 1000, "tokens_out": 500, "occurred_at": "2026-07-10T10:05:00+00:00"}
+        "tenant_id": TENANT,
+        "idempotency_key": "chatcmpl-hand-0001",
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "tokens_in": 1000,
+        "tokens_out": 500,
+        "occurred_at": "2026-07-10T10:05:00+00:00",
+    }
 
 
 def test_embeddings_have_no_output_tokens_and_take_the_model_argument():
@@ -49,7 +57,7 @@ def test_final_stream_chunk_maps_like_a_response():
 
 
 def test_cached_tokens_stay_inside_prompt_tokens():
-    assert usage_event(CACHED, TENANT)["tokens_in"] == 2000   # cached_tokens (1500) is not subtracted or added
+    assert usage_event(CACHED, TENANT)["tokens_in"] == 2000  # cached_tokens (1500) is not subtracted or added
 
 
 def test_created_becomes_a_zoned_iso_time():
@@ -57,17 +65,20 @@ def test_created_becomes_a_zoned_iso_time():
     assert parsed.utcoffset() is not None and parsed == datetime(2026, 7, 10, 10, 5, tzinfo=timezone.utc)
 
 
-@pytest.mark.parametrize("break_it", [
-    lambda r: r.pop("usage"),
-    lambda r: r.update(usage=None),
-    lambda r: r["usage"].pop("prompt_tokens"),
-    lambda r: r["usage"].pop("completion_tokens"),
-    lambda r: r["usage"].update(completion_tokens=None),
-    lambda r: r["usage"].update(prompt_tokens="12"),
-    lambda r: r["usage"].update(prompt_tokens=1.5),
-    lambda r: r["usage"].update(prompt_tokens=-1),
-    lambda r: r.pop("created"),
-])
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        lambda r: r.pop("usage"),
+        lambda r: r.update(usage=None),
+        lambda r: r["usage"].pop("prompt_tokens"),
+        lambda r: r["usage"].pop("completion_tokens"),
+        lambda r: r["usage"].update(completion_tokens=None),
+        lambda r: r["usage"].update(prompt_tokens="12"),
+        lambda r: r["usage"].update(prompt_tokens=1.5),
+        lambda r: r["usage"].update(prompt_tokens=-1),
+        lambda r: r.pop("created"),
+    ],
+)
 def test_missing_or_bad_usage_raises_and_is_never_zero(break_it):
     response = json.loads(json.dumps(CHAT))
     break_it(response)
@@ -124,11 +135,14 @@ def test_rollup_and_charge_are_exact_integers(api, conn):
         assert post_usage(usage_event(response, TENANT, model), api, TENANT)[0] == 201
     assert close_hour(conn, HOUR) == (3, 4)
     lines, total = charge_lines(conn, TENANT, HOUR, datetime(2026, 7, 10, 11, tzinfo=timezone.utc))
-    assert {ln["model"]: ln["micros"] for ln in lines} == {
-        "meta-llama/Llama-3.1-8B-Instruct": 4320,    # (1040 * 2000 + 560 * 4000) / 1000
-        "meta-llama/Llama-3.3-70B-Instruct": 6600,   # (2000 * 3000 + 100 * 6000) / 1000: cached tokens at the full input price
-        "BAAI/bge-large-en-v1.5": 752,               # 501 * 1500 / 1000 = 751.5, rounded half up
-    }
+    assert (
+        {ln["model"]: ln["micros"] for ln in lines}
+        == {
+            "meta-llama/Llama-3.1-8B-Instruct": 4320,  # (1040 * 2000 + 560 * 4000) / 1000
+            "meta-llama/Llama-3.3-70B-Instruct": 6600,  # (2000 * 3000 + 100 * 6000) / 1000: cached tokens at the full input price
+            "BAAI/bge-large-en-v1.5": 752,  # 501 * 1500 / 1000 = 751.5, rounded half up
+        }
+    )
     assert total == 11672 and isinstance(total, int)
 
 
@@ -136,8 +150,11 @@ class StandIn(BaseHTTPRequestHandler):
     seen = {}
 
     def do_POST(self):
-        StandIn.seen = {"path": self.path, "auth": self.headers["Authorization"],
-                        "body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+        StandIn.seen = {
+            "path": self.path,
+            "auth": self.headers["Authorization"],
+            "body": json.loads(self.rfile.read(int(self.headers["Content-Length"]))),
+        }
         payload = json.dumps(CHAT).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(payload)))
@@ -160,7 +177,7 @@ def test_fetch_chat_sends_the_documented_path_and_bare_key_header(stand_in):
     reply = fetch_chat(stand_in, "key-123", {"model": "m", "messages": []})
     assert reply == CHAT
     assert StandIn.seen["path"] == "/v1/inference/chat/completions"
-    assert StandIn.seen["auth"] == "key-123"   # no "Bearer"
+    assert StandIn.seen["auth"] == "key-123"  # no "Bearer"
 
 
 def test_cli_replay_posts_a_list_and_a_resend_is_a_duplicate(api, conn, tmp_path, capsys):
@@ -206,8 +223,12 @@ def test_cli_live_spools_the_response_before_posting_only_when_asked(api, stand_
     monkeypatch.setenv("SEEKR_API_KEY", "key-SECRET-xyz")
     spool = tmp_path / "saved.json"
     # a refused post (unknown tenant) still leaves the response on disk, so the usage can be replayed
-    assert seekrflow.main(["live", "--tenant", "nobody", "--prompt", "hi", "--api", api, "--base", stand_in,
-                           "--spool", str(spool)]) == 1
+    assert (
+        seekrflow.main(
+            ["live", "--tenant", "nobody", "--prompt", "hi", "--api", api, "--base", stand_in, "--spool", str(spool)]
+        )
+        == 1
+    )
     assert json.loads(spool.read_text())["usage"]["prompt_tokens"] >= 0
     assert "key-SECRET-xyz" not in capsys.readouterr().err
     assert seekrflow.main(["replay", str(spool), "--tenant", TENANT, "--api", api]) == 0
@@ -225,7 +246,7 @@ def test_fetch_chat_does_not_follow_a_redirect_with_the_key(stand_in):
     reached = []
 
     class Elsewhere(BaseHTTPRequestHandler):
-        def do_POST(self):   # urllib turns a followed 302 into a GET, so both methods record the header
+        def do_POST(self):  # urllib turns a followed 302 into a GET, so both methods record the header
             reached.append(self.headers["Authorization"])
             self.send_response(200)
             self.send_header("Content-Length", "2")
@@ -241,7 +262,7 @@ def test_fetch_chat_does_not_follow_a_redirect_with_the_key(stand_in):
     threading.Thread(target=other.serve_forever, daemon=True).start()
 
     class Redirector(BaseHTTPRequestHandler):
-        def do_POST(self):   # an empty body, as a real redirect has
+        def do_POST(self):  # an empty body, as a real redirect has
             self.rfile.read(int(self.headers["Content-Length"]))
             self.send_response(302)
             self.send_header("Location", f"http://127.0.0.1:{other.server_port}/v1/inference/chat/completions")

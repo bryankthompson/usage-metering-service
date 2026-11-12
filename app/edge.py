@@ -7,6 +7,7 @@ authentication (anyone can send any header: do not expose this edge without a re
 
 Tests of other modules override it: `app.dependency_overrides[require_entitlement] = lambda: "tenant"`.
 """
+
 import logging
 from datetime import datetime, timezone
 
@@ -44,14 +45,15 @@ def require_entitlement(request: Request) -> str:
         # The server hands header bytes over as latin-1; clients send UTF-8, so a non-ASCII tenant id arrives garbled.
         tenant_id = tenant_id.encode("latin-1").decode("utf-8")
     except UnicodeError:
-        pass                                                    # not UTF-8: keep it as received, it just will not match
-    tenant_id = tenant_id.strip(" \t")                          # HTTP optional whitespace is a space or a tab, nothing else
+        pass  # not UTF-8: keep it as received, it just will not match
+    tenant_id = tenant_id.strip(" \t")  # HTTP optional whitespace is a space or a tab, nothing else
     if not tenant_id:
         raise _deny(401, None, "X-Tenant-Id header is required")
     try:
         with request_connection() as conn:
             row = conn.execute(
-                "SELECT status, grace_until FROM entitlements WHERE tenant_id = %s", (tenant_id,)).fetchone()
+                "SELECT status, grace_until FROM entitlements WHERE tenant_id = %s", (tenant_id,)
+            ).fetchone()
     except psycopg.Error as err:
         log.error("edge cannot read entitlements: %s", err)
         raise _deny(503, tenant_id, "entitlement check unavailable") from err

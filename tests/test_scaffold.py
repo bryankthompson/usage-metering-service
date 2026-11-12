@@ -18,7 +18,8 @@ def test_schema_is_repeatable(conn):
 def test_usage_events_is_append_only(conn):
     conn.execute(
         "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
-        " VALUES ('t', 'k', 'm', 1, 2, now())")
+        " VALUES ('t', 'k', 'm', 1, 2, now())"
+    )
     conn.commit()
     with pytest.raises(psycopg.errors.RaiseException):
         conn.execute("UPDATE usage_events SET tokens_in = 99")

@@ -2,6 +2,7 @@
 
 No database and no Docker: both scripts keep their pure logic importable. Scripts are loaded by path (scripts/ is not a package).
 """
+
 import importlib.util
 import json
 import threading
@@ -35,13 +36,13 @@ def micros(tokens_in, tokens_out, prices=None, hour=H):
 
 
 def test_demo_numbers_match_demo_sh():
-    assert micros(3000, 500) == 6000   # scripts/demo.sh step 7
+    assert micros(3000, 500) == 6000  # scripts/demo.sh step 7
 
 
 def test_half_a_micro_rounds_up_and_just_under_rounds_down():
-    assert micros(1, 0) == 2      # 1.5 micros
-    assert micros(1, 0, [{**V1, "input": 1499}]) == 1   # 1.499
-    assert micros(0, 1, [{**V1, "output": 1}]) == 0     # 0.001
+    assert micros(1, 0) == 2  # 1.5 micros
+    assert micros(1, 0, [{**V1, "input": 1499}]) == 1  # 1.499
+    assert micros(0, 1, [{**V1, "output": 1}]) == 0  # 0.001
 
 
 def test_zero_tokens_cost_nothing_but_still_have_a_line():
@@ -50,13 +51,13 @@ def test_zero_tokens_cost_nothing_but_still_have_a_line():
 
 def test_rounding_happens_once_per_row_not_per_side():
     prices = [{**V1, "input": 400, "output": 400}]
-    assert micros(1, 1, prices) == 1   # 0.8 once; per side it would be 0 + 0
+    assert micros(1, 1, prices) == 1  # 0.8 once; per side it would be 0 + 0
 
 
 def test_price_change_inside_an_hour_does_not_split_it():
     v2 = {"version": 2, "effective_from": H + timedelta(minutes=30), "input": 3000, "output": 3000}
-    assert micros(1000, 0, [V1, v2], hour=H) == 1500                    # the hour started before the change: old price
-    assert micros(1000, 0, [V1, v2], hour=H + timedelta(hours=1)) == 3000   # the next hour starts after it: new price
+    assert micros(1000, 0, [V1, v2], hour=H) == 1500  # the hour started before the change: old price
+    assert micros(1000, 0, [V1, v2], hour=H + timedelta(hours=1)) == 3000  # the next hour starts after it: new price
 
 
 def test_a_tie_on_effective_from_goes_to_the_later_version():
@@ -83,6 +84,7 @@ def test_closed_hour_messages_say_who_closed_it_and_to_re_run():
 
 # ---- the stand-in server ----
 
+
 def serve(seed):
     server = stand_in.make_server(0, seed)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -90,8 +92,9 @@ def serve(seed):
 
 
 def ask(server, path, body):
-    request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}{path}", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json"})
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_port}{path}", json.dumps(body).encode(), {"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(request) as reply:
         return json.load(reply)
 
@@ -111,7 +114,7 @@ def test_same_seed_gives_the_same_token_counts_and_different_seeds_do_not():
     counts = lambda rs: [r["usage"] for r in rs[0] + rs[1]]
     assert counts(run_requests(7)) == counts(run_requests(7))
     assert counts(run_requests(7)) != counts(run_requests(8))
-    assert len({u["prompt_tokens"] for u in counts(run_requests(7))}) > 1   # they vary per request
+    assert len({u["prompt_tokens"] for u in counts(run_requests(7))}) > 1  # they vary per request
 
 
 def test_every_body_is_accepted_by_the_adapter_and_ids_are_unique():

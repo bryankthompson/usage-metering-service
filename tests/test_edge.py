@@ -25,8 +25,9 @@ def client(monkeypatch):
 
 
 def entitle(conn, status, grace_until=None, tenant="tenant-1"):
-    conn.execute("INSERT INTO entitlements (tenant_id, status, grace_until) VALUES (%s, %s, %s)",
-                 (tenant, status, grace_until))
+    conn.execute(
+        "INSERT INTO entitlements (tenant_id, status, grace_until) VALUES (%s, %s, %s)", (tenant, status, grace_until)
+    )
     conn.commit()
 
 
@@ -93,11 +94,16 @@ def test_unknown_status_is_402(client, monkeypatch):
 
     monkeypatch.setattr(edge, "request_connection", Stub)
     resp = client.get("/probe", headers=HEADERS)
-    assert (resp.status_code, resp.json()["detail"]) == (402, "not entitled: status something_new")   # not "no entitlement": the stub was read
+    assert (resp.status_code, resp.json()["detail"]) == (
+        402,
+        "not entitled: status something_new",
+    )  # not "no entitlement": the stub was read
 
 
 def test_database_down_is_503_never_allowed(client, conn, monkeypatch):
-    entitle(conn, "active")                                                   # would be allowed if the check could run
-    monkeypatch.setenv("DATABASE_URL", "postgresql://metering:metering@localhost:1/metering")   # nothing listens on port 1
+    entitle(conn, "active")  # would be allowed if the check could run
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://metering:metering@localhost:1/metering"
+    )  # nothing listens on port 1
     resp = client.get("/probe", headers=HEADERS)
     assert resp.status_code == 503

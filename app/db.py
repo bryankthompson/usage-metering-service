@@ -1,5 +1,6 @@
 """Postgres access: plain SQL through psycopg. The API's request path borrows connections from a pool (`request_connection`);
 the rollup, reconcile, delinquent and mirror jobs and the tests open and close their own (`connect`)."""
+
 import atexit
 import logging
 import math
@@ -50,8 +51,10 @@ def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) 
 
 def _session_setup(conn: psycopg.Connection, statement_timeout_ms: int) -> None:
     # A session SET, not the `options` keyword: that would replace any options in the URL or PGOPTIONS.
-    conn.execute("SELECT set_config('statement_timeout', %s, false), set_config('TimeZone', 'UTC', false)",
-                 (str(int(statement_timeout_ms)),))
+    conn.execute(
+        "SELECT set_config('statement_timeout', %s, false), set_config('TimeZone', 'UTC', false)",
+        (str(int(statement_timeout_ms)),),
+    )
     conn.commit()
 
 
@@ -61,11 +64,11 @@ def _session_setup(conn: psycopg.Connection, statement_timeout_ms: int) -> None:
 # env DB_POOL_TIMEOUT (seconds a request waits for a free connection) defaults to CONNECT_TIMEOUT_S.
 DEFAULT_POOL_MAX = 40
 POOL_MIN = 2
-APPLICATION_NAME = "usage-metering-api"   # in pg_stat_activity: which sessions are the request path's pool
+APPLICATION_NAME = "usage-metering-api"  # in pg_stat_activity: which sessions are the request path's pool
 
 _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()
-_holding = threading.local()      # whether this thread has a pooled connection checked out
+_holding = threading.local()  # whether this thread has a pooled connection checked out
 
 
 def _env_number(name: str, default: float, kind: type) -> float:
@@ -101,13 +104,17 @@ def _request_pool() -> ConnectionPool:
                     timeout=_env_number("DB_POOL_TIMEOUT", CONNECT_TIMEOUT_S, float),
                     # `prepare_threshold=None`: a connection that lives for hours would otherwise switch to prepared statements
                     # after five uses of a query, and a generic plan for the range queries; a fresh connection never did.
-                    kwargs={"row_factory": dict_row, "connect_timeout": CONNECT_TIMEOUT_S, "prepare_threshold": None,
-                            "application_name": APPLICATION_NAME},
+                    kwargs={
+                        "row_factory": dict_row,
+                        "connect_timeout": CONNECT_TIMEOUT_S,
+                        "prepare_threshold": None,
+                        "application_name": APPLICATION_NAME,
+                    },
                     configure=_configure_pooled,
-                    check=ConnectionPool.check_connection,   # a connection that died while idle is replaced, not handed out
+                    check=ConnectionPool.check_connection,  # a connection that died while idle is replaced, not handed out
                     open=False,
                 )
-                pool.open(wait=False)                        # a database that is down now does not stop the app starting
+                pool.open(wait=False)  # a database that is down now does not stop the app starting
                 _pool = pool
     return _pool
 
@@ -152,7 +159,7 @@ def close_pool() -> None:
 atexit.register(close_pool)
 
 
-LOCK_WAIT = "2s"        # how long a request waits for a lock before it answers 503; never used on the rollup (closing) side
+LOCK_WAIT = "2s"  # how long a request waits for a lock before it answers 503; never used on the rollup (closing) side
 
 
 def limit_lock_wait(conn: psycopg.Connection) -> None:

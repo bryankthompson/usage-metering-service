@@ -3,6 +3,7 @@
 OLD_DUE_HOURS is the query as it was before it was made sargable (a full scan of usage_events). It is the oracle: any
 difference from it means the rollup would close a different set of hours, which is the money path.
 """
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -47,8 +48,10 @@ def assert_same_as_old(conn, cutoffs):
     for cutoff in cutoffs:
         new, old = due(conn, rollup.DUE_HOURS, cutoff), due(conn, OLD_DUE_HOURS, cutoff)
         assert new == old, f"cutoff {cutoff.isoformat()}: new {new} != old {old}"
-        assert all(h.tzinfo is not None and h == h.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-                   for h in new)
+        assert all(
+            h.tzinfo is not None and h == h.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+            for h in new
+        )
         assert new == sorted(set(new))
 
 
@@ -59,10 +62,15 @@ def test_the_oracle_and_the_new_query_agree_on_an_empty_table(conn):
 
 def test_events_on_and_around_an_hour_boundary(conn):
     # 09:59:59.999999 is hour 9; 10:00:00 and 10:00:00.000001 are hour 10; 11:00:00 is hour 11
-    for i, when in enumerate(["2026-11-10T09:59:59.999999Z", "2026-11-10T10:00:00Z", "2026-11-10T10:00:00.000001Z",
-                              "2026-11-10T11:00:00Z"]):
+    for i, when in enumerate(
+        ["2026-11-10T09:59:59.999999Z", "2026-11-10T10:00:00Z", "2026-11-10T10:00:00.000001Z", "2026-11-10T11:00:00Z"]
+    ):
         add_event(conn, f"b{i}", when)
-    assert due(conn, OLD_DUE_HOURS, utc(2026, 11, 10, 12)) == [utc(2026, 11, 10, 9), utc(2026, 11, 10, 10), utc(2026, 11, 10, 11)]
+    assert due(conn, OLD_DUE_HOURS, utc(2026, 11, 10, 12)) == [
+        utc(2026, 11, 10, 9),
+        utc(2026, 11, 10, 10),
+        utc(2026, 11, 10, 11),
+    ]
     assert_same_as_old(conn, cutoffs_around(utc(2026, 11, 10, 10), utc(2026, 11, 10, 11), utc(2026, 11, 10, 12)))
 
 
@@ -76,9 +84,9 @@ def test_the_cutoff_exactly_at_the_end_of_an_hour_makes_it_due_and_one_microseco
 
 
 def test_offsets_that_are_not_utc_land_in_their_utc_hour(conn):
-    add_event(conn, "o1", "2026-11-10T15:30:00+05:30")   # 10:00 UTC
+    add_event(conn, "o1", "2026-11-10T15:30:00+05:30")  # 10:00 UTC
     add_event(conn, "o2", "2026-11-10T06:59:59.999999-05:00")  # 11:59:59.999999 UTC
-    add_event(conn, "o3", "2026-11-10T23:00:00+13:00")   # 10:00 UTC, a whole-hour offset
+    add_event(conn, "o3", "2026-11-10T23:00:00+13:00")  # 10:00 UTC, a whole-hour offset
     assert due(conn, rollup.DUE_HOURS, utc(2030, 1, 1)) == [utc(2026, 11, 10, 10), utc(2026, 11, 10, 11)]
     assert_same_as_old(conn, cutoffs_around(utc(2026, 11, 10, 11), utc(2026, 11, 10, 12)))
 
@@ -86,7 +94,7 @@ def test_offsets_that_are_not_utc_land_in_their_utc_hour(conn):
 def test_closed_hours_are_left_out_and_late_events_do_not_reopen_them(conn):
     add_event(conn, "l1", "2026-11-10T08:10:00Z")
     add_event(conn, "l2", "2026-11-10T09:10:00Z")
-    add_event(conn, "l3", "2026-11-10T09:20:00Z", late=True)   # late: its hour was already closed when it arrived
+    add_event(conn, "l3", "2026-11-10T09:20:00Z", late=True)  # late: its hour was already closed when it arrived
     add_event(conn, "l4", "2026-11-10T10:10:00Z")
     close(conn, utc(2026, 11, 10, 9))
     assert due(conn, rollup.DUE_HOURS, utc(2030, 1, 1)) == [utc(2026, 11, 10, 8), utc(2026, 11, 10, 10)]
@@ -132,7 +140,7 @@ def test_year_one_and_a_far_future_event(conn):
     add_event(conn, "y2", "0001-01-01T00:59:59.999999Z")
     add_event(conn, "now", "2026-11-10T10:00:00Z")
     add_event(conn, "far1", "9999-12-31T22:00:00Z")
-    add_event(conn, "far2", "9999-12-31T23:59:59.999999Z")   # its hour ends in year 10000: never due, and no error
+    add_event(conn, "far2", "9999-12-31T23:59:59.999999Z")  # its hour ends in year 10000: never due, and no error
     first_two = [utc(1, 1, 1, 0), utc(2026, 11, 10, 10)]
     assert due(conn, rollup.DUE_HOURS, utc(2026, 11, 11)) == first_two
     assert due(conn, rollup.DUE_HOURS, utc(9999, 12, 31, 22, 59, 59, 999999)) == first_two
@@ -166,15 +174,20 @@ def test_close_due_hours_closes_the_same_hours_for_any_now_and_grace(conn):
 
 def due_text(conn, sql, cutoff):
     """The hours as text, so an infinity row can be compared (psycopg refuses to load one as a datetime)."""
-    rows = conn.execute(f"SELECT hour_start::text AS t FROM ({sql}) q ORDER BY hour_start", {"cutoff": cutoff}).fetchall()
+    rows = conn.execute(
+        f"SELECT hour_start::text AS t FROM ({sql}) q ORDER BY hour_start", {"cutoff": cutoff}
+    ).fetchall()
     conn.commit()
     return [r["t"] for r in rows]
 
 
 def add_raw_event(conn, key, occurred_at_sql):
     """Straight SQL, as an operator could do it: the API refuses these, the schema does not."""
-    conn.execute("INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
-                 f" VALUES ('t1', %s, 'mA', 1, 1, '{occurred_at_sql}')", (key,))
+    conn.execute(
+        "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
+        f" VALUES ('t1', %s, 'mA', 1, 1, '{occurred_at_sql}')",
+        (key,),
+    )
     conn.commit()
 
 
@@ -191,7 +204,7 @@ def test_a_plus_infinity_event_is_ignored_and_the_query_ends(conn):
     add_raw_event(conn, "inf", "infinity")
     cutoff = utc(2030, 1, 1)
     assert due_text(conn, rollup.DUE_HOURS, cutoff) == ["2026-11-10 08:00:00+00", "2026-11-10 10:00:00+00"]
-    assert due_text(conn, rollup.DUE_HOURS, cutoff) == due_text(conn, OLD_DUE_HOURS, cutoff)   # as before: never due
+    assert due_text(conn, rollup.DUE_HOURS, cutoff) == due_text(conn, OLD_DUE_HOURS, cutoff)  # as before: never due
 
 
 def test_a_minus_infinity_event_is_still_returned_so_the_close_fails_loudly_as_before(conn):
@@ -201,7 +214,7 @@ def test_a_minus_infinity_event_is_still_returned_so_the_close_fails_loudly_as_b
     cutoff = utc(2030, 1, 1)
     assert due_text(conn, rollup.DUE_HOURS, cutoff) == ["-infinity", "2026-11-10 08:00:00+00"]
     assert due_text(conn, rollup.DUE_HOURS, cutoff) == due_text(conn, OLD_DUE_HOURS, cutoff)
-    with pytest.raises(psycopg.DataError):   # psycopg cannot load '-infinity' as a datetime: the run stops with an error
+    with pytest.raises(psycopg.DataError):  # psycopg cannot load '-infinity' as a datetime: the run stops with an error
         rollup.close_due_hours(conn, cutoff)
     conn.rollback()
 
@@ -216,7 +229,7 @@ def test_both_infinities_next_to_normal_events_end_too(conn):
 
 # --- the plan: DUE_HOURS must cost per hour, not per event -------------------------------------------------------------
 
-HOURS, PER_HOUR = 300, 200   # 60,000 events: the old plan reads all of them, the new one one per hour
+HOURS, PER_HOUR = 300, 200  # 60,000 events: the old plan reads all of them, the new one one per hour
 
 
 def seed_many(conn, tenants=20):
@@ -224,11 +237,13 @@ def seed_many(conn, tenants=20):
         "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
         f" SELECT 'tenant-' || mod(g, {tenants}), 'k' || g, 'm', 1, 1,"
         f" timestamptz '2026-01-01 00:00:00+00' + (g / {PER_HOUR}) * interval '1 hour' + mod(g, {PER_HOUR}) * interval '10 seconds'"
-        f" FROM generate_series(0, {HOURS * PER_HOUR - 1}) g")
+        f" FROM generate_series(0, {HOURS * PER_HOUR - 1}) g"
+    )
     # every 50th hour is left open
     conn.execute(
         "INSERT INTO closed_hours (hour_start) SELECT timestamptz '2026-01-01 00:00:00+00' + g * interval '1 hour'"
-        f" FROM generate_series(0, {HOURS - 1}) g WHERE mod(g, 50) <> 7")
+        f" FROM generate_series(0, {HOURS - 1}) g WHERE mod(g, 50) <> 7"
+    )
     conn.commit()
     conn.execute("ANALYZE usage_events")
     conn.execute("ANALYZE closed_hours")
@@ -261,7 +276,7 @@ def test_due_hours_does_not_read_every_event(conn):
     assert not [n for n in nodes if "Seq Scan" in n["Node Type"] and n.get("Relation Name") == "usage_events"]
     read = events_read(nodes)
     assert read <= 2 * HOURS, f"read {read} rows of usage_events for {HOURS} hours of {PER_HOUR} events"
-    assert len(due(conn, rollup.DUE_HOURS, cutoff)) == len(range(7, HOURS, 50))   # and it still found the open hours
+    assert len(due(conn, rollup.DUE_HOURS, cutoff)) == len(range(7, HOURS, 50))  # and it still found the open hours
     assert due(conn, rollup.DUE_HOURS, cutoff) == due(conn, OLD_DUE_HOURS, cutoff)
     # the guard itself: the old query reads every event, so the same measure sees it
     assert events_read(plan_nodes(conn, OLD_DUE_HOURS, {"cutoff": cutoff})) == HOURS * PER_HOUR
@@ -277,8 +292,11 @@ def test_unclosed_hours_for_one_tenant_uses_the_tenant_index(conn):
 
 # --- the indexes ---------------------------------------------------------------------------------------------------------
 
+
 def usage_event_indexes(conn):
-    rows = conn.execute("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'usage_events' ORDER BY indexname").fetchall()
+    rows = conn.execute(
+        "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'usage_events' ORDER BY indexname"
+    ).fetchall()
     conn.commit()
     return {r["indexname"]: r["indexdef"] for r in rows}
 
@@ -286,7 +304,9 @@ def usage_event_indexes(conn):
 def test_the_tenant_and_time_index_exists_and_the_time_index_is_kept(conn):
     indexes = usage_event_indexes(conn)
     assert indexes["usage_events_tenant_occurred_at"].endswith("USING btree (tenant_id, occurred_at)")
-    assert indexes["usage_events_occurred_at"].endswith("USING btree (occurred_at)")   # AGGREGATE_HOUR and DUE_HOURS use it
+    assert indexes["usage_events_occurred_at"].endswith(
+        "USING btree (occurred_at)"
+    )  # AGGREGATE_HOUR and DUE_HOURS use it
 
 
 def test_applying_the_schema_again_changes_no_index(conn):

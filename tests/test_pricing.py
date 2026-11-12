@@ -12,7 +12,9 @@ HOUR = timedelta(hours=1)
 def add_rollup(conn, tenant, model, hour_start, tokens_in, tokens_out):
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-        " VALUES (%s, %s, %s, %s, %s, 1)", (tenant, model, hour_start, tokens_in, tokens_out))
+        " VALUES (%s, %s, %s, %s, %s, 1)",
+        (tenant, model, hour_start, tokens_in, tokens_out),
+    )
     conn.commit()
 
 
@@ -32,9 +34,9 @@ def test_naive_datetime_is_rejected(conn):
 def test_price_at_picks_version_across_the_effective_boundary(conn):
     add_price_version(conn, "m1", T0, 1000, 2000)
     add_price_version(conn, "m1", T0 + 2 * HOUR, 3000, 4000)
-    assert price_at(conn, "m1", T0)["version"] == 1                              # exactly at the first start
+    assert price_at(conn, "m1", T0)["version"] == 1  # exactly at the first start
     assert price_at(conn, "m1", T0 + 2 * HOUR - timedelta(microseconds=1))["version"] == 1
-    assert price_at(conn, "m1", T0 + 2 * HOUR)["version"] == 2                   # the boundary belongs to the new price
+    assert price_at(conn, "m1", T0 + 2 * HOUR)["version"] == 2  # the boundary belongs to the new price
     assert price_at(conn, "m1", T0 + 30 * HOUR)["input_micros_per_1k"] == 3000
 
 
@@ -46,10 +48,10 @@ def test_same_effective_time_goes_to_the_later_version(conn):
 
 def test_no_price_raises_never_zero(conn):
     with pytest.raises(NoPrice):
-        price_at(conn, "unknown", T0)                                            # model never priced
+        price_at(conn, "unknown", T0)  # model never priced
     add_price_version(conn, "m1", T0, 1000, 2000)
     with pytest.raises(NoPrice):
-        rate(conn, "m1", 10, 10, T0 - timedelta(seconds=1))                      # before the first version
+        rate(conn, "m1", 10, 10, T0 - timedelta(seconds=1))  # before the first version
 
 
 def test_rate_exact_values(conn):
@@ -62,11 +64,11 @@ def test_rate_exact_values(conn):
 
 def test_rate_rounds_half_up(conn):
     add_price_version(conn, "half", T0, 1500, 1500)
-    assert rate(conn, "half", 1, 0, T0) == 2           # 1.5 -> 2
+    assert rate(conn, "half", 1, 0, T0) == 2  # 1.5 -> 2
     add_price_version(conn, "below", T0, 1499, 0)
-    assert rate(conn, "below", 1, 0, T0) == 1          # 1.499 -> 1
+    assert rate(conn, "below", 1, 0, T0) == 1  # 1.499 -> 1
     add_price_version(conn, "tiny", T0, 499, 0)
-    assert rate(conn, "tiny", 1, 0, T0) == 0           # 0.499 -> 0, a real zero only because the price says so
+    assert rate(conn, "tiny", 1, 0, T0) == 0  # 0.499 -> 0, a real zero only because the price says so
 
 
 def test_rate_rounds_once_on_the_sum(conn):
@@ -105,7 +107,7 @@ def test_stored_versions_cannot_change(conn):
 def test_charge_lines_apply_a_mid_period_price_change_from_its_effective_time(conn):
     add_price_version(conn, "m1", T0, 1000, 2000)
     add_price_version(conn, "m1", T0 + 2 * HOUR, 3000, 4000)
-    for n in range(4):                                                           # hours 0, 1 at v1; hours 2, 3 at v2
+    for n in range(4):  # hours 0, 1 at v1; hours 2, 3 at v2
         add_rollup(conn, "t1", "m1", T0 + n * HOUR, 1000, 1000)
     lines, total = charge_lines(conn, "t1", T0, T0 + 4 * HOUR)
     assert [(line["price_version"], line["micros"]) for line in lines] == [(1, 3000), (1, 3000), (2, 7000), (2, 7000)]
@@ -117,8 +119,8 @@ def test_charge_lines_window_is_half_open_and_per_tenant(conn):
     add_price_version(conn, "m1", T0, 1000, 1000)
     add_rollup(conn, "t1", "m1", T0, 1000, 0)
     add_rollup(conn, "t1", "m1", T0 + HOUR, 1000, 0)
-    add_rollup(conn, "t2", "m1", T0, 9000, 0)                                    # another tenant: never counted
-    lines, total = charge_lines(conn, "t1", T0, T0 + HOUR)                       # end is excluded
+    add_rollup(conn, "t2", "m1", T0, 9000, 0)  # another tenant: never counted
+    lines, total = charge_lines(conn, "t1", T0, T0 + HOUR)  # end is excluded
     assert [line["hour_start"] for line in lines] == [T0]
     assert total == 1000
 
@@ -129,7 +131,7 @@ def test_charge_lines_for_an_empty_window_is_zero_lines(conn):
 
 def test_charge_lines_without_a_price_raises(conn):
     add_price_version(conn, "m1", T0 + HOUR, 1000, 1000)
-    add_rollup(conn, "t1", "m1", T0, 1000, 0)                                    # the hour starts before any price
+    add_rollup(conn, "t1", "m1", T0, 1000, 0)  # the hour starts before any price
     with pytest.raises(NoPrice):
         charge_lines(conn, "t1", T0, T0 + 2 * HOUR)
 

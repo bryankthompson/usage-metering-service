@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from tests.stripe_signing import SECRET, event, payment_failed_event, sign, subscription_event
 
-T = 1_793_000_000                                    # a fixed event time, in unix seconds
+T = 1_793_000_000  # a fixed event time, in unix seconds
 URL = "/v1/stripe/webhook"
 
 
@@ -42,6 +42,7 @@ def count(conn, table):
 
 
 # --- signature and secret: nothing unsigned is ever accepted, and nothing changes in the database ---
+
 
 def test_bad_signature_is_400_and_changes_nothing(client, conn):
     payload = subscription_event("evt_1", T)
@@ -81,12 +82,17 @@ def test_signed_but_malformed_json_is_400(client, conn):
 
 # --- customer.subscription.* ---
 
+
 def test_subscription_active_creates_the_entitlement(client, conn):
     resp = post(client, subscription_event("evt_1", T))
     assert resp.status_code == 200 and resp.json() == {"status": "processed"}
     r = row(conn)
     assert (r["status"], r["plan"], r["stripe_customer_id"], r["stripe_subscription_id"]) == (
-        "active", "price_test_pro", "cus_test_1", "sub_test_1")
+        "active",
+        "price_test_pro",
+        "cus_test_1",
+        "sub_test_1",
+    )
     assert r["last_event_at"] == at(T) and r["grace_until"] is None
     assert count(conn, "stripe_events") == 1
 
@@ -96,7 +102,9 @@ def test_trialing_counts_as_active(client, conn):
     assert row(conn)["status"] == "active"
 
 
-@pytest.mark.parametrize("stripe_status", ["canceled", "unpaid", "incomplete", "incomplete_expired", "paused", "brand_new"])
+@pytest.mark.parametrize(
+    "stripe_status", ["canceled", "unpaid", "incomplete", "incomplete_expired", "paused", "brand_new"]
+)
 def test_every_other_status_denies(client, conn, stripe_status):
     post(client, subscription_event("evt_1", T, status="active"))
     post(client, subscription_event("evt_2", T + 10, status=stripe_status))
@@ -123,6 +131,7 @@ def test_subscription_without_tenant_id_is_ignored(client, conn):
 
 
 # --- invoice.payment_failed ---
+
 
 def test_payment_failed_sets_past_due_and_a_72_hour_grace(client, conn):
     post(client, subscription_event("evt_1", T))
@@ -155,7 +164,7 @@ def test_subscription_past_due_keeps_the_existing_grace_window(client, conn):
 def test_subscription_past_due_with_no_grace_window_has_none(client, conn):
     post(client, subscription_event("evt_1", T, status="past_due"))
     r = row(conn)
-    assert r["status"] == "past_due" and r["grace_until"] is None          # the edge denies this (see test_edge)
+    assert r["status"] == "past_due" and r["grace_until"] is None  # the edge denies this (see test_edge)
 
 
 def test_active_again_clears_the_failure_and_the_grace(client, conn):
@@ -190,12 +199,13 @@ def test_unhandled_event_type_is_ignored(client, conn):
 
 # --- once per event id, and in order ---
 
+
 def test_duplicate_delivery_changes_nothing(client, conn):
     first = payment_failed_event("evt_2", T + 100)
     post(client, subscription_event("evt_1", T))
     assert post(client, first).json() == {"status": "processed"}
-    post(client, subscription_event("evt_3", T + 200, status="active"))       # newer state: active again
-    resp = post(client, first)                                                # Stripe redelivers evt_2
+    post(client, subscription_event("evt_3", T + 200, status="active"))  # newer state: active again
+    resp = post(client, first)  # Stripe redelivers evt_2
     assert resp.status_code == 200 and resp.json() == {"status": "duplicate"}
     assert row(conn)["status"] == "active"
     assert count(conn, "stripe_events") == 3
@@ -244,23 +254,31 @@ def test_an_older_invoice_failure_fills_a_missing_grace_window(client, conn):
     assert resp.json() == {"status": "processed"}
     r = row(conn)
     # The window is counted from the failure's own time, and last_event_at stays at the newer event.
-    assert (r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == (at(T), at(T) + timedelta(hours=72), at(T + 100))
+    assert (r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == (
+        at(T),
+        at(T) + timedelta(hours=72),
+        at(T + 100),
+    )
 
 
 def test_a_repeated_payment_failure_does_not_extend_the_grace_window(client, conn):
     post(client, subscription_event("evt_1", T))
     post(client, payment_failed_event("evt_2", T + 100))
-    resp = post(client, payment_failed_event("evt_3", T + 86400))             # a Stripe retry a day later
+    resp = post(client, payment_failed_event("evt_3", T + 86400))  # a Stripe retry a day later
     assert resp.json() == {"status": "processed"}
     r = row(conn)
-    assert (r["status"], r["payment_failed_at"], r["grace_until"]) == ("past_due", at(T + 100), at(T + 100) + timedelta(hours=72))
-    assert r["last_event_at"] == at(T + 86400)                                # the retry is still recorded as the newest event
+    assert (r["status"], r["payment_failed_at"], r["grace_until"]) == (
+        "past_due",
+        at(T + 100),
+        at(T + 100) + timedelta(hours=72),
+    )
+    assert r["last_event_at"] == at(T + 86400)  # the retry is still recorded as the newest event
 
 
 def test_a_new_delinquency_after_active_again_gets_a_fresh_window(client, conn):
     post(client, subscription_event("evt_1", T))
     post(client, payment_failed_event("evt_2", T + 100))
-    post(client, subscription_event("evt_3", T + 200, status="active"))       # cured: clears the window
+    post(client, subscription_event("evt_3", T + 200, status="active"))  # cured: clears the window
     post(client, payment_failed_event("evt_4", T + 300))
     r = row(conn)
     assert (r["payment_failed_at"], r["grace_until"]) == (at(T + 300), at(T + 300) + timedelta(hours=72))
@@ -268,14 +286,20 @@ def test_a_new_delinquency_after_active_again_gets_a_fresh_window(client, conn):
 
 def test_subscription_deleted_cancels_whatever_status_the_payload_carries(client, conn):
     post(client, subscription_event("evt_1", T))
-    resp = post(client, subscription_event("evt_2", T + 10, status="active", event_type="customer.subscription.deleted"))
+    resp = post(
+        client, subscription_event("evt_2", T + 10, status="active", event_type="customer.subscription.deleted")
+    )
     assert resp.json() == {"status": "processed"} and row(conn)["status"] == "canceled"
 
 
 def test_an_older_failure_after_a_newer_past_due_opens_one_window_and_a_later_older_one_does_not_move_it(client, conn):
     post(client, subscription_event("evt_1", T + 200, status="active"))
-    post(client, subscription_event("evt_2", T + 400, status="past_due"))     # past_due, no window yet
-    assert post(client, payment_failed_event("evt_3", T)).json() == {"status": "processed"}   # opens it, from T
+    post(client, subscription_event("evt_2", T + 400, status="past_due"))  # past_due, no window yet
+    assert post(client, payment_failed_event("evt_3", T)).json() == {"status": "processed"}  # opens it, from T
     assert post(client, payment_failed_event("evt_4", T + 300)).json() == {"status": "stale"}  # window already open
     r = row(conn)
-    assert (r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == (at(T), at(T) + timedelta(hours=72), at(T + 400))
+    assert (r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == (
+        at(T),
+        at(T) + timedelta(hours=72),
+        at(T + 400),
+    )

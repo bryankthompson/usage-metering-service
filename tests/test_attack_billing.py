@@ -3,6 +3,7 @@
 Each test states the attack. Tests that only repeat what tests/test_edge.py, test_pricing.py or test_pricing_charges.py
 already pin are not here.
 """
+
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -26,21 +27,29 @@ def client():
 
 
 def entitle(conn, tenant, status="active", grace_until=None):
-    conn.execute("INSERT INTO entitlements (tenant_id, status, grace_until) VALUES (%s, %s, %s)", (tenant, status, grace_until))
+    conn.execute(
+        "INSERT INTO entitlements (tenant_id, status, grace_until) VALUES (%s, %s, %s)", (tenant, status, grace_until)
+    )
     conn.commit()
 
 
 def rollup(conn, tenant, model, hour_start, tokens_in, tokens_out):
-    conn.execute("INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-                 " VALUES (%s, %s, %s, %s, %s, 1)", (tenant, model, hour_start, tokens_in, tokens_out))
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " VALUES (%s, %s, %s, %s, %s, 1)",
+        (tenant, model, hour_start, tokens_in, tokens_out),
+    )
     conn.commit()
 
 
 def charges(client, tenant, header=None, **params):
-    return client.get(f"/v1/tenants/{tenant}/charges", params=params or RANGE, headers={"X-Tenant-Id": header or tenant})
+    return client.get(
+        f"/v1/tenants/{tenant}/charges", params=params or RANGE, headers={"X-Tenant-Id": header or tenant}
+    )
 
 
 # --- edge: the tenant header ---
+
 
 @pytest.fixture
 def probe():
@@ -78,9 +87,23 @@ def test_a_repeated_tenant_header_is_never_a_500(probe, conn):
     assert resp.status_code == 200 and resp.json()["tenant"] in ("tenant-1", "tenant-2")
 
 
-@pytest.mark.parametrize("tenant", ["x' OR '1'='1", "tenant-1'; DROP TABLE entitlements; --", "%", "_", "tenant-%", "ten_nt-1", "T" * 20_000, "../tenant-1", "tenant-1\\", "tenant-1,tenant-2"])
+@pytest.mark.parametrize(
+    "tenant",
+    [
+        "x' OR '1'='1",
+        "tenant-1'; DROP TABLE entitlements; --",
+        "%",
+        "_",
+        "tenant-%",
+        "ten_nt-1",
+        "T" * 20_000,
+        "../tenant-1",
+        "tenant-1\\",
+        "tenant-1,tenant-2",
+    ],
+)
 def test_odd_tenant_ids_are_matched_exactly_not_as_patterns(probe, conn, tenant):
-    entitle(conn, "tenant-1")                                        # the only entitled tenant
+    entitle(conn, "tenant-1")  # the only entitled tenant
     assert probe.get("/probe", headers={"X-Tenant-Id": tenant}).status_code == 402
     assert conn.execute("SELECT count(*) AS n FROM entitlements").fetchone()["n"] == 1
 
@@ -89,7 +112,7 @@ def test_odd_tenant_ids_are_matched_exactly_not_as_patterns(probe, conn, tenant)
 def test_look_alike_tenant_ids_are_other_tenants(probe, conn, variant):
     entitle(conn, "tenant-1")
     resp = probe.get("/probe", headers={"X-Tenant-Id": variant.encode("utf-8")})
-    assert resp.status_code in (402, 401), resp.text                   # never the entitled tenant's access
+    assert resp.status_code in (402, 401), resp.text  # never the entitled tenant's access
 
 
 def test_a_non_ascii_tenant_id_sent_as_utf8_matches_its_own_entitlement(probe, conn):
@@ -98,7 +121,10 @@ def test_a_non_ascii_tenant_id_sent_as_utf8_matches_its_own_entitlement(probe, c
     entitle(conn, "tenant-é")
     resp = probe.get("/probe", headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
     assert (resp.status_code, resp.json()) == (200, {"tenant": "tenant-é"})
-    assert probe.get("/probe", headers={"X-Tenant-Id": b"tenant-\xe9"}).status_code in (200, 402)   # latin-1 bytes: no crash
+    assert probe.get("/probe", headers={"X-Tenant-Id": b"tenant-\xe9"}).status_code in (
+        200,
+        402,
+    )  # latin-1 bytes: no crash
 
 
 def test_header_bytes_that_are_not_utf8_are_a_402_not_a_crash(probe, conn):
@@ -108,6 +134,7 @@ def test_header_bytes_that_are_not_utf8_are_a_402_not_a_crash(probe, conn):
 
 # --- cross-tenant: the header, the path and the data must all name one tenant ---
 
+
 def test_one_entitled_tenant_cannot_read_another_entitled_tenants_charges(client, conn):
     add_price_version(conn, "m1", T0, 1000, 2000)
     entitle(conn, "tenant-a")
@@ -116,10 +143,12 @@ def test_one_entitled_tenant_cannot_read_another_entitled_tenants_charges(client
     resp = charges(client, "tenant-b", header="tenant-a")
     assert resp.status_code == 403
     assert resp.json() == {"detail": "tenant does not match the caller"}
-    assert charges(client, "tenant-a").json()["lines"] == []                # a's own view holds none of b's rows
+    assert charges(client, "tenant-a").json()["lines"] == []  # a's own view holds none of b's rows
 
 
-@pytest.mark.parametrize("path_tenant", ["Tenant-A", "tenant-a%20", "%20tenant-a", "tenant-a%00", "tenant-a%2e", "tenant-b", "TENANT-A"])
+@pytest.mark.parametrize(
+    "path_tenant", ["Tenant-A", "tenant-a%20", "%20tenant-a", "tenant-a%00", "tenant-a%2e", "tenant-b", "TENANT-A"]
+)
 def test_a_path_that_differs_from_the_header_in_any_way_is_403_or_404(client, conn, path_tenant):
     entitle(conn, "tenant-a")
     resp = client.get(f"/v1/tenants/{path_tenant}/charges", params=RANGE, headers={"X-Tenant-Id": "tenant-a"})
@@ -132,6 +161,7 @@ def test_the_charges_route_is_402_for_a_tenant_without_an_entitlement_even_with_
 
 
 # --- the price table ---
+
 
 @pytest.mark.parametrize("bad", [1.5, 1.0, True, "1500", None, float("nan")])
 def test_a_price_that_is_not_an_integer_is_refused_not_rounded(conn, bad):
@@ -172,9 +202,9 @@ def test_a_price_from_the_far_future_is_not_in_force_and_one_from_year_one_alway
 def test_the_price_in_force_is_found_across_utc_offsets(conn):
     add_price_version(conn, "m1", T0, 100, 100)
     plus14 = timezone(timedelta(hours=14))
-    assert price_at(conn, "m1", datetime(2026, 11, 1, 14, 0, tzinfo=plus14))["version"] == 1       # == T0 exactly
+    assert price_at(conn, "m1", datetime(2026, 11, 1, 14, 0, tzinfo=plus14))["version"] == 1  # == T0 exactly
     with pytest.raises(NoPrice):
-        price_at(conn, "m1", datetime(2026, 11, 1, 13, 59, 59, 999999, tzinfo=plus14))             # one microsecond before T0
+        price_at(conn, "m1", datetime(2026, 11, 1, 13, 59, 59, 999999, tzinfo=plus14))  # one microsecond before T0
 
 
 # --- rating at the extremes ---
@@ -189,7 +219,7 @@ def test_the_largest_stored_tokens_times_the_largest_price_is_exact_through_the_
     expected = (BIGINT_MAX * BIGINT_MAX * 2 + 500) // 1000
     resp = charges(client, "tenant-1")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["total_micros"] == expected                       # an exact Python int, not a float
+    assert resp.json()["total_micros"] == expected  # an exact Python int, not a float
     assert resp.json()["lines"][0]["micros"] == expected
     assert isinstance(resp.json()["total_micros"], int)
 
@@ -204,9 +234,9 @@ def test_zero_tokens_cost_zero_and_still_show_as_a_line(client, conn):
 
 def test_charges_pick_the_same_version_as_price_at_at_every_boundary(conn):
     # charge_lines picks from versions it loaded once; price_at asks the database. They must never disagree.
-    add_price_version(conn, "m1", T0, 1, 1)                              # v1
-    add_price_version(conn, "m1", T0 + timedelta(minutes=90), 2, 2)      # v2: mid-hour
-    add_price_version(conn, "m1", T0 + 3 * HOUR, 3, 3)                   # v3 and v4 share one instant: the later wins
+    add_price_version(conn, "m1", T0, 1, 1)  # v1
+    add_price_version(conn, "m1", T0 + timedelta(minutes=90), 2, 2)  # v2: mid-hour
+    add_price_version(conn, "m1", T0 + 3 * HOUR, 3, 3)  # v3 and v4 share one instant: the later wins
     add_price_version(conn, "m1", T0 + 3 * HOUR, 4, 4)
     for h in range(8):
         rollup(conn, "tenant-1", "m1", T0 + h * HOUR, 1000, 0)
@@ -216,23 +246,24 @@ def test_charges_pick_the_same_version_as_price_at_at_every_boundary(conn):
 
 
 def test_a_sum_of_lines_is_exact_even_when_each_line_rounds(conn):
-    add_price_version(conn, "m1", T0, 1500, 0)                           # 1 token = 1.5 micros, which rounds to 2
+    add_price_version(conn, "m1", T0, 1500, 0)  # 1 token = 1.5 micros, which rounds to 2
     for h in range(10):
         rollup(conn, "tenant-1", "m1", T0 + h * HOUR, 1, 0)
     lines, total = charge_lines(conn, "tenant-1", T0, T0 + 10 * HOUR)
-    assert [l["micros"] for l in lines] == [2] * 10 and total == 20      # rounded per line, never 15 on the whole
+    assert [l["micros"] for l in lines] == [2] * 10 and total == 20  # rounded per line, never 15 on the whole
 
 
 # --- charges ranges ---
 
+
 def test_a_gap_before_the_first_price_fails_the_whole_request_409_and_names_the_model(client, conn):
-    add_price_version(conn, "m1", T0 + HOUR, 1000, 1000)                 # in force from hour 1 only
+    add_price_version(conn, "m1", T0 + HOUR, 1000, 1000)  # in force from hour 1 only
     entitle(conn, "tenant-1")
-    rollup(conn, "tenant-1", "m1", T0, 10, 10)                           # hour 0: no price yet
+    rollup(conn, "tenant-1", "m1", T0, 10, 10)  # hour 0: no price yet
     rollup(conn, "tenant-1", "m1", T0 + HOUR, 10, 10)
     resp = charges(client, "tenant-1")
     assert resp.status_code == 409 and "m1" in resp.json()["detail"]
-    assert "lines" not in resp.json()                                    # no partial bill
+    assert "lines" not in resp.json()  # no partial bill
 
 
 def test_one_unpriced_model_among_priced_ones_is_409_not_a_bill_without_it(client, conn):
@@ -243,30 +274,43 @@ def test_one_unpriced_model_among_priced_ones_is_409_not_a_bill_without_it(clien
     assert charges(client, "tenant-1").status_code == 409
 
 
-@pytest.mark.parametrize("params", [
-    {"start": "2026-11-01T00:00:00Z", "end": "2026-11-01T00:00:00Z"},                 # start == end
-    {"start": "2026-11-01T00:00:00", "end": "2026-11-02T00:00:00Z"},                  # naive start
-    {"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00"},                  # naive end
-    {"start": "2026-11-01", "end": "2026-11-02"},                                     # dates only
-    {"start": "", "end": "2026-11-02T00:00:00Z"}, {"end": "2026-11-02T00:00:00Z"}, {"start": "2026-11-01T00:00:00Z"}, {},
-    {"start": "yesterday", "end": "now"}, {"start": "2026-13-45T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
-    {"start": "9" * 5000, "end": "2026-11-02T00:00:00Z"}, {"start": "NaN", "end": "Infinity"},
-    {"start": "2026-11-02T00:00:00Z", "end": "2026-11-01T00:00:00Z"},                 # backwards
-])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"start": "2026-11-01T00:00:00Z", "end": "2026-11-01T00:00:00Z"},  # start == end
+        {"start": "2026-11-01T00:00:00", "end": "2026-11-02T00:00:00Z"},  # naive start
+        {"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00"},  # naive end
+        {"start": "2026-11-01", "end": "2026-11-02"},  # dates only
+        {"start": "", "end": "2026-11-02T00:00:00Z"},
+        {"end": "2026-11-02T00:00:00Z"},
+        {"start": "2026-11-01T00:00:00Z"},
+        {},
+        {"start": "yesterday", "end": "now"},
+        {"start": "2026-13-45T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
+        {"start": "9" * 5000, "end": "2026-11-02T00:00:00Z"},
+        {"start": "NaN", "end": "Infinity"},
+        {"start": "2026-11-02T00:00:00Z", "end": "2026-11-01T00:00:00Z"},  # backwards
+    ],
+)
 def test_bad_ranges_are_422_never_a_500(client, conn, params):
     entitle(conn, "tenant-1")
     resp = client.get("/v1/tenants/tenant-1/charges", params=params, headers={"X-Tenant-Id": "tenant-1"})
     assert resp.status_code == 422, resp.text
 
 
-@pytest.mark.parametrize("start, end", [
-    ("0001-01-01T00:00:00+05:00", "0001-01-02T00:00:00+05:00"),                       # before UTC year one
-    ("9999-12-31T00:00:00-12:00", "9999-12-31T23:59:59.999999-12:00"),                # past UTC year 9999
-    ("1969-12-31T23:59:59Z", "1970-01-01T00:00:01Z"),                                 # across the epoch
-])
+@pytest.mark.parametrize(
+    "start, end",
+    [
+        ("0001-01-01T00:00:00+05:00", "0001-01-02T00:00:00+05:00"),  # before UTC year one
+        ("9999-12-31T00:00:00-12:00", "9999-12-31T23:59:59.999999-12:00"),  # past UTC year 9999
+        ("1969-12-31T23:59:59Z", "1970-01-01T00:00:01Z"),  # across the epoch
+    ],
+)
 def test_extreme_ranges_are_answered_not_crashed(client, conn, start, end):
     entitle(conn, "tenant-1")
-    resp = client.get("/v1/tenants/tenant-1/charges", params={"start": start, "end": end}, headers={"X-Tenant-Id": "tenant-1"})
+    resp = client.get(
+        "/v1/tenants/tenant-1/charges", params={"start": start, "end": end}, headers={"X-Tenant-Id": "tenant-1"}
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["lines"] == [] and resp.json()["total_micros"] == 0
 
@@ -288,26 +332,39 @@ def test_a_three_year_range_of_hourly_rows_is_billed_in_reasonable_time(conn):
     add_price_version(conn, "m2", T0, 3, 4)
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-        " SELECT 'tenant-1', m, %s + g * interval '1 hour', 10, 10, 1 FROM generate_series(0, 4999) g, unnest(ARRAY['m1','m2']) m", (T0,))
+        " SELECT 'tenant-1', m, %s + g * interval '1 hour', 10, 10, 1 FROM generate_series(0, 4999) g, unnest(ARRAY['m1','m2']) m",
+        (T0,),
+    )
     conn.commit()
     started = time.monotonic()
     lines, total = charge_lines(conn, "tenant-1", T0, T0 + timedelta(days=3 * 365))
     elapsed = time.monotonic() - started
-    assert len(lines) == 10_000 and total == 5000 * 30                  # m1 30 micros an hour; m2 0.07 rounds to 0
+    assert len(lines) == 10_000 and total == 5000 * 30  # m1 30 micros an hour; m2 0.07 rounds to 0
     assert elapsed < 3, f"10,000 rows took {elapsed:.1f}s: one price lookup per row"
 
 
 # --- the whole route with the real edge: header, path and body must name one tenant ---
 
+
 def usage_body(tenant, key="k1"):
-    return {"tenant_id": tenant, "idempotency_key": key, "model": "m1", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-01T00:30:00Z"}
+    return {
+        "tenant_id": tenant,
+        "idempotency_key": key,
+        "model": "m1",
+        "tokens_in": 1,
+        "tokens_out": 1,
+        "occurred_at": "2026-11-01T00:30:00Z",
+    }
 
 
 def test_usage_for_another_tenant_is_403_and_stored_nowhere_even_when_both_are_entitled(client, conn):
     entitle(conn, "tenant-a")
     entitle(conn, "tenant-b")
     assert client.post("/v1/usage", json=usage_body("tenant-b"), headers={"X-Tenant-Id": "tenant-a"}).status_code == 403
-    assert client.post("/v1/usage", json=usage_body("tenant-a", "k2"), headers={"X-Tenant-Id": "tenant-b"}).status_code == 403
+    assert (
+        client.post("/v1/usage", json=usage_body("tenant-a", "k2"), headers={"X-Tenant-Id": "tenant-b"}).status_code
+        == 403
+    )
     assert conn.execute("SELECT count(*) AS n FROM usage_events").fetchone()["n"] == 0
     assert client.post("/v1/usage", json=usage_body("tenant-a"), headers={"X-Tenant-Id": "tenant-a"}).status_code == 201
 
@@ -324,7 +381,9 @@ def test_a_non_ascii_tenant_can_use_the_whole_route(client, conn):
     add_price_version(conn, "m1", T0, 1000, 2000)
     entitle(conn, "tenant-é")
     rollup(conn, "tenant-é", "m1", T0, 1000, 500)
-    resp = client.get("/v1/tenants/tenant-%C3%A9/charges", params=RANGE, headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
+    resp = client.get(
+        "/v1/tenants/tenant-%C3%A9/charges", params=RANGE, headers={"X-Tenant-Id": "tenant-é".encode("utf-8")}
+    )
     assert resp.status_code == 200 and resp.json()["total_micros"] == 2000
     posted = client.post("/v1/usage", json=usage_body("tenant-é"), headers={"X-Tenant-Id": "tenant-é".encode("utf-8")})
     assert posted.status_code == 201
@@ -332,12 +391,22 @@ def test_a_non_ascii_tenant_can_use_the_whole_route(client, conn):
 
 # --- the 422 body itself must be serializable: FastAPI echoes the offending input ---
 
-@pytest.mark.parametrize("query", [
-    "start=NaN&end=Infinity", "start=-Infinity&end=1e999", "start=%ED%A0%80&end=%ED%B0%80",          # lone surrogates, UTF-8 encoded
-    "start=%FF%FE&end=%C0%AF", "start=%00&end=%00", "start=2026-11-01T00:00:00Z%00&end=2026-11-02T00:00:00Z",
-    "start=%F0%9F%98%80&end=%E3%83%86", "start=" + "%E3" * 3000 + "&end=x", "start[]=1&end[]=2",
-    "start=2026-11-01T00:00:00Z&start=2026-11-01T00:00:00Z&end=junk",
-])
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "start=NaN&end=Infinity",
+        "start=-Infinity&end=1e999",
+        "start=%ED%A0%80&end=%ED%B0%80",  # lone surrogates, UTF-8 encoded
+        "start=%FF%FE&end=%C0%AF",
+        "start=%00&end=%00",
+        "start=2026-11-01T00:00:00Z%00&end=2026-11-02T00:00:00Z",
+        "start=%F0%9F%98%80&end=%E3%83%86",
+        "start=" + "%E3" * 3000 + "&end=x",
+        "start[]=1&end[]=2",
+        "start=2026-11-01T00:00:00Z&start=2026-11-01T00:00:00Z&end=junk",
+    ],
+)
 def test_hostile_query_strings_are_422_never_a_500(client, conn, query):
     entitle(conn, "tenant-1")
     resp = client.get(f"/v1/tenants/tenant-1/charges?{query}", headers={"X-Tenant-Id": "tenant-1"})
@@ -345,7 +414,15 @@ def test_hostile_query_strings_are_422_never_a_500(client, conn, query):
     assert isinstance(resp.json()["detail"], (str, list))
 
 
-@pytest.mark.parametrize("path", ["/v1/tenants/%ED%A0%80/charges", "/v1/tenants/%FF/charges", "/v1/tenants/%00/charges", "/v1/tenants/%E3%83%86/charges"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/tenants/%ED%A0%80/charges",
+        "/v1/tenants/%FF/charges",
+        "/v1/tenants/%00/charges",
+        "/v1/tenants/%E3%83%86/charges",
+    ],
+)
 def test_hostile_path_tenants_are_403_never_a_500(client, conn, path):
     entitle(conn, "tenant-1")
     resp = client.get(path + "?" + "&".join(f"{k}={v}" for k, v in RANGE.items()), headers={"X-Tenant-Id": "tenant-1"})
@@ -353,6 +430,7 @@ def test_hostile_path_tenants_are_403_never_a_500(client, conn, path):
 
 
 # --- start and end are ISO 8601 text, never Unix seconds ---
+
 
 @pytest.mark.parametrize("value", ["5", "0", "-5", "1762770600", "1762770600.5", "1e9", "20261101", "+5", " 5", "٥"])
 @pytest.mark.parametrize("which", ["start", "end"])
@@ -368,9 +446,14 @@ def test_every_iso_spelling_still_gives_the_same_bill(client, conn):
     add_price_version(conn, "m1", T0, 1000, 2000)
     entitle(conn, "tenant-1")
     rollup(conn, "tenant-1", "m1", T0, 1000, 500)
-    spellings = [("2026-11-01T00:00:00Z", "2026-11-01T01:00:00Z"), ("2026-11-01T00:00:00+00:00", "2026-11-01T01:00:00+00:00"),
-                 ("2026-11-01T00:00:00.000000Z", "2026-11-01T01:00:00.0Z"), ("2026-11-01T02:00:00+02:00", "2026-11-01T03:00:00+02:00"),
-                 ("2026-10-31T19:00:00-05:00", "2026-10-31T20:00:00-05:00"), ("2026-11-01 00:00:00Z", "2026-11-01 01:00:00Z")]
+    spellings = [
+        ("2026-11-01T00:00:00Z", "2026-11-01T01:00:00Z"),
+        ("2026-11-01T00:00:00+00:00", "2026-11-01T01:00:00+00:00"),
+        ("2026-11-01T00:00:00.000000Z", "2026-11-01T01:00:00.0Z"),
+        ("2026-11-01T02:00:00+02:00", "2026-11-01T03:00:00+02:00"),
+        ("2026-10-31T19:00:00-05:00", "2026-10-31T20:00:00-05:00"),
+        ("2026-11-01 00:00:00Z", "2026-11-01 01:00:00Z"),
+    ]
     totals = {charges(client, "tenant-1", start=s, end=e).json()["total_micros"] for s, e in spellings}
     assert totals == {2000}
 
@@ -378,8 +461,10 @@ def test_every_iso_spelling_still_gives_the_same_bill(client, conn):
 def test_a_price_version_that_cannot_be_decoded_does_not_break_a_bill_for_a_past_hour(conn):
     # Written by SQL (add_price_version cannot): 'infinity' has no Python datetime, so loading every version failed the bill.
     add_price_version(conn, "m1", T0, 1000, 2000)
-    conn.execute("INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
-                 " VALUES ('m1', 2, 'infinity', 5, 5)")
+    conn.execute(
+        "INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
+        " VALUES ('m1', 2, 'infinity', 5, 5)"
+    )
     conn.commit()
     rollup(conn, "t1", "m1", T0, 1000, 1000)
     lines, total = charge_lines(conn, "t1", T0, T0 + HOUR)
@@ -391,8 +476,8 @@ def test_a_dst_fall_back_hour_is_billed_with_the_price_in_force_then(conn):
     # wall clock, so with the session in that zone the 05:00Z row looked as late as the 06:00Z price. UTC sessions hide it.
     conn.execute("SET TIME ZONE 'America/New_York'")
     first, second = datetime(2026, 11, 1, 5, tzinfo=timezone.utc), datetime(2026, 11, 1, 6, tzinfo=timezone.utc)
-    add_price_version(conn, "m1", T0 - 24 * HOUR, 1000, 0)    # v1
-    add_price_version(conn, "m1", second, 5000, 0)             # v2 takes effect at 06:00Z
+    add_price_version(conn, "m1", T0 - 24 * HOUR, 1000, 0)  # v1
+    add_price_version(conn, "m1", second, 5000, 0)  # v2 takes effect at 06:00Z
     rollup(conn, "t1", "m1", first, 1000, 0)
     rollup(conn, "t1", "m1", second, 1000, 0)
     lines, _ = charge_lines(conn, "t1", first, second + HOUR)

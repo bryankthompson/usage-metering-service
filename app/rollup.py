@@ -7,6 +7,7 @@ per-hour advisory lock (see docs/ingest.md).
 
 CLI: `python -m app.rollup` closes every due hour once; `--every SECONDS` repeats forever.
 """
+
 import argparse
 import logging
 import sys
@@ -79,7 +80,9 @@ def _require_aware(ts: datetime, name: str) -> None:
         raise ValueError(f"{name} must be timezone-aware, got {ts!r}")
 
 
-def close_hour(conn: psycopg.Connection, hour_start: datetime, defer_mirror: list | None = None) -> tuple[int, int] | None:
+def close_hour(
+    conn: psycopg.Connection, hour_start: datetime, defer_mirror: list | None = None
+) -> tuple[int, int] | None:
     """Close one UTC hour. Returns (rollup rows written, events counted), or None if it was already closed.
 
     Commits (or rolls back and re-raises). Closing an hour twice changes nothing. After the commit, when
@@ -195,7 +198,9 @@ def run_once() -> list[datetime]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="python -m app.rollup", description="Close every due hour once, or keep doing it with --every.")
+    parser = argparse.ArgumentParser(
+        prog="python -m app.rollup", description="Close every due hour once, or keep doing it with --every."
+    )
     parser.add_argument("--every", type=int, metavar="SECONDS", help="repeat forever, sleeping SECONDS between runs")
     args = parser.parse_args(argv)
     if args.every is not None and args.every <= 0:

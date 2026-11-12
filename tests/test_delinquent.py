@@ -15,8 +15,10 @@ def fixed_clock(monkeypatch):
 
 
 def put(conn, tenant, status, grace_until=None, failed_at=None):
-    conn.execute("INSERT INTO entitlements (tenant_id, status, payment_failed_at, grace_until) VALUES (%s, %s, %s, %s)",
-                 (tenant, status, failed_at, grace_until))
+    conn.execute(
+        "INSERT INTO entitlements (tenant_id, status, payment_failed_at, grace_until) VALUES (%s, %s, %s, %s)",
+        (tenant, status, failed_at, grace_until),
+    )
     conn.commit()
 
 
@@ -39,8 +41,16 @@ def test_each_state_with_whole_hours(conn, capsys):
     _, out = run(capsys, "--json")
     rows = {r["tenant_id"]: r for r in map(json.loads, out.splitlines())}
     assert set(rows) == {"a-grace", "b-expired", "c-none", "d-canceled"}
-    assert (rows["a-grace"]["state"], rows["a-grace"]["hours_left"], rows["a-grace"]["hours_ago"]) == ("in_grace", 5, None)
-    assert (rows["b-expired"]["state"], rows["b-expired"]["hours_ago"], rows["b-expired"]["hours_left"]) == ("grace_expired", 2, None)
+    assert (rows["a-grace"]["state"], rows["a-grace"]["hours_left"], rows["a-grace"]["hours_ago"]) == (
+        "in_grace",
+        5,
+        None,
+    )
+    assert (rows["b-expired"]["state"], rows["b-expired"]["hours_ago"], rows["b-expired"]["hours_left"]) == (
+        "grace_expired",
+        2,
+        None,
+    )
     assert rows["c-none"]["state"] == "past_due_no_grace"
     assert rows["d-canceled"]["state"] == "canceled"
     assert rows["a-grace"]["payment_failed_at"] == (NOW - H).isoformat()
@@ -58,8 +68,13 @@ def test_order_denied_first_then_in_grace_by_least_time_left(conn, capsys):
     put(conn, "t3", "canceled")
     put(conn, "t4", "past_due")
     put(conn, "t5", "past_due", NOW - H)
-    assert states(capsys) == [("t5", "grace_expired"), ("t4", "past_due_no_grace"), ("t3", "canceled"),
-                              ("t2", "in_grace"), ("t1", "in_grace")]
+    assert states(capsys) == [
+        ("t5", "grace_expired"),
+        ("t4", "past_due_no_grace"),
+        ("t3", "canceled"),
+        ("t2", "in_grace"),
+        ("t1", "in_grace"),
+    ]
 
 
 def test_at_evaluates_at_that_instant(conn, capsys):
@@ -104,6 +119,7 @@ def test_state_rule_matches_the_real_edge(conn):
     """The report's in_grace is exactly what the edge lets through, around the boundary."""
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
+
     probe = FastAPI()
 
     @probe.get("/probe")

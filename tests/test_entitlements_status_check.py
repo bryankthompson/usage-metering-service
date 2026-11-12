@@ -1,4 +1,5 @@
 """entitlements.status accepts only what the webhook writes (active, past_due, canceled); the schema refuses the rest."""
+
 import psycopg
 import pytest
 

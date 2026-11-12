@@ -1,4 +1,5 @@
 """Locally signed Stripe test fixtures. The secret is obviously fake; nothing here talks to Stripe."""
+
 import hashlib
 import hmac
 import json
@@ -15,22 +16,35 @@ def sign(payload: bytes, secret: str = SECRET, timestamp: int | None = None) -> 
 
 
 def event(event_id: str, event_type: str, created: int, obj: dict) -> bytes:
-    return json.dumps({"id": event_id, "object": "event", "type": event_type, "created": created,
-                       "data": {"object": obj}}).encode()
+    return json.dumps(
+        {"id": event_id, "object": "event", "type": event_type, "created": created, "data": {"object": obj}}
+    ).encode()
 
 
-def subscription_event(event_id: str, created: int, tenant_id: str | None = "tenant-1", status: str = "active",
-                       customer: str = "cus_test_1", price: str = "price_test_pro",
-                       event_type: str = "customer.subscription.updated", sub_id: str | None = "sub_test_1") -> bytes:
+def subscription_event(
+    event_id: str,
+    created: int,
+    tenant_id: str | None = "tenant-1",
+    status: str = "active",
+    customer: str = "cus_test_1",
+    price: str = "price_test_pro",
+    event_type: str = "customer.subscription.updated",
+    sub_id: str | None = "sub_test_1",
+) -> bytes:
     """`sub_id=None` leaves the subscription id out of the payload."""
-    sub = {"object": "subscription", "customer": customer, "status": status,
-           "metadata": {"tenant_id": tenant_id} if tenant_id else {},
-           "items": {"data": [{"price": {"id": price}}]}}
+    sub = {
+        "object": "subscription",
+        "customer": customer,
+        "status": status,
+        "metadata": {"tenant_id": tenant_id} if tenant_id else {},
+        "items": {"data": [{"price": {"id": price}}]},
+    }
     if sub_id is not None:
         sub = {"id": sub_id, **sub}
     return event(event_id, event_type, created, sub)
 
 
 def payment_failed_event(event_id: str, created: int, customer: str = "cus_test_1") -> bytes:
-    return event(event_id, "invoice.payment_failed", created,
-                 {"id": "in_test_1", "object": "invoice", "customer": customer})
+    return event(
+        event_id, "invoice.payment_failed", created, {"id": "in_test_1", "object": "invoice", "customer": customer}
+    )

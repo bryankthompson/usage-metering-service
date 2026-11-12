@@ -4,6 +4,7 @@ The single route is the oracle: the batch must store the same rows, with the sam
 per event. The race tests are the money path (an acknowledged event is in the log once, in the right hour, with the right
 `late`): see the mutation list in docs/ingest.md.
 """
+
 import json
 import logging
 import random
@@ -47,13 +48,16 @@ def short_wait(monkeypatch):
 
 
 def rows(conn):
-    got = conn.execute("SELECT idempotency_key, model, tokens_in, tokens_out, occurred_at, late FROM usage_events"
-                       " ORDER BY idempotency_key").fetchall()
+    got = conn.execute(
+        "SELECT idempotency_key, model, tokens_in, tokens_out, occurred_at, late FROM usage_events"
+        " ORDER BY idempotency_key"
+    ).fetchall()
     conn.commit()
     return got
 
 
 # --- the route and its answer -------------------------------------------------------------------------------------
+
 
 def test_a_batch_stores_every_event_and_answers_in_input_order(client, conn, caplog):
     sent = [event(idempotency_key=k, tokens_in=i) for i, k in enumerate(["b", "c", "a"])]
@@ -67,7 +71,9 @@ def test_a_batch_stores_every_event_and_answers_in_input_order(client, conn, cap
     stored = {r["idempotency_key"]: r for r in rows(conn)}
     assert [stored[x["idempotency_key"]]["tokens_in"] for x in body["results"]] == [0, 1, 2]
     ids = conn.execute("SELECT id, idempotency_key FROM usage_events").fetchall()
-    assert {i["idempotency_key"]: i["id"] for i in ids} == {x["idempotency_key"]: x["event_id"] for x in body["results"]}
+    assert {i["idempotency_key"]: i["id"] for i in ids} == {
+        x["idempotency_key"]: x["event_id"] for x in body["results"]
+    }
     assert "usage batch: tenant=t1 events=3 accepted=3 duplicate=0" in caplog.text
 
 
@@ -81,11 +87,13 @@ def test_a_resent_batch_stores_nothing_and_is_200(client, conn):
 
 
 def test_a_thousand_events_with_ten_repeats_inside_the_batch_store_990(client, conn):
-    sent = events(990) + events(10)                       # the last ten repeat the first ten, identical
+    sent = events(990) + events(10)  # the last ten repeat the first ten, identical
     r = client.post(BATCH, json=batch(*sent))
     assert (r.status_code, r.json()["accepted"], r.json()["duplicate"]) == (201, 990, 10)
     statuses = [x["status"] for x in r.json()["results"]]
-    assert statuses[:990] == ["accepted"] * 990 and statuses[990:] == ["duplicate"] * 10   # the later one is the duplicate
+    assert (
+        statuses[:990] == ["accepted"] * 990 and statuses[990:] == ["duplicate"] * 10
+    )  # the later one is the duplicate
     assert [x["event_id"] for x in r.json()["results"][990:]] == [x["event_id"] for x in r.json()["results"][:10]]
     assert count(conn) == 990
     again = client.post(BATCH, json=batch(*sent))
@@ -110,24 +118,30 @@ def test_the_same_key_twice_with_the_same_payload_is_one_row_and_a_duplicate(cli
 
 
 def test_the_same_instant_in_another_offset_is_a_duplicate_in_the_batch(client, conn):
-    r = client.post(BATCH, json=batch(event(occurred_at="2026-11-10T10:30:00Z"), event(occurred_at="2026-11-10T11:30:00+01:00")))
+    r = client.post(
+        BATCH, json=batch(event(occurred_at="2026-11-10T10:30:00Z"), event(occurred_at="2026-11-10T11:30:00+01:00"))
+    )
     assert r.status_code == 201 and r.json()["duplicate"] == 1 and count(conn) == 1
 
 
 # --- the single route as the oracle -------------------------------------------------------------------------------
 
-LONG = "\U0001F600" * 200
+LONG = "\U0001f600" * 200
 EQUIVALENCE_SET = [
     event(idempotency_key="new"),
     event(idempotency_key="resend"),
     event(idempotency_key="resend"),
-    event(idempotency_key="closed-hour", occurred_at="2026-11-10T09:15:00Z"),               # H - 1 h is closed: late
-    event(idempotency_key="boundary-lo", occurred_at="2026-11-10T09:59:59.999999Z"),        # 1 us before H: the closed hour
-    event(idempotency_key="boundary-hi", occurred_at="2026-11-10T10:00:00Z"),               # exactly H: open
+    event(idempotency_key="closed-hour", occurred_at="2026-11-10T09:15:00Z"),  # H - 1 h is closed: late
+    event(idempotency_key="boundary-lo", occurred_at="2026-11-10T09:59:59.999999Z"),  # 1 us before H: the closed hour
+    event(idempotency_key="boundary-hi", occurred_at="2026-11-10T10:00:00Z"),  # exactly H: open
     event(idempotency_key="boundary-hi-offset", occurred_at="2026-11-10T10:59:59.999999+00:00"),
-    event(idempotency_key="offset-into-closed", occurred_at="2026-11-10T10:30:00+01:30"),   # 09:00 UTC: closed
-    event(idempotency_key="negative-offset", occurred_at="2026-11-10T04:59:59.999999-05:00"),  # 09:59:59.999999 UTC: closed
-    event(idempotency_key="offset-plus-16", occurred_at="2026-11-10T10:30:00+16:00"),        # past Postgres's text limit of 15:59
+    event(idempotency_key="offset-into-closed", occurred_at="2026-11-10T10:30:00+01:30"),  # 09:00 UTC: closed
+    event(
+        idempotency_key="negative-offset", occurred_at="2026-11-10T04:59:59.999999-05:00"
+    ),  # 09:59:59.999999 UTC: closed
+    event(
+        idempotency_key="offset-plus-16", occurred_at="2026-11-10T10:30:00+16:00"
+    ),  # past Postgres's text limit of 15:59
     event(idempotency_key="offset-minus-23-59", occurred_at="2026-11-10T10:30:00-23:59"),
     event(idempotency_key="year-1", occurred_at="0001-01-01T00:00:00Z"),
     event(idempotency_key="year-9999", occurred_at="9999-12-31T23:59:59.999999Z"),
@@ -149,27 +163,32 @@ def reset_with_a_closed_hour(conn):
 
 def test_the_batch_stores_the_same_rows_and_statuses_as_the_single_route(client, conn):
     reset_with_a_closed_hour(conn)
-    one_by_one = [{201: "accepted", 200: "duplicate"}[client.post("/v1/usage", json=e).status_code] for e in EQUIVALENCE_SET]
+    one_by_one = [
+        {201: "accepted", 200: "duplicate"}[client.post("/v1/usage", json=e).status_code] for e in EQUIVALENCE_SET
+    ]
     expected_rows = rows(conn)
     reset_with_a_closed_hour(conn)
     r = client.post(BATCH, json=batch(*EQUIVALENCE_SET))
     assert r.status_code == 201
     assert [x["status"] for x in r.json()["results"]] == one_by_one
-    assert rows(conn) == expected_rows                                  # including `late`
+    assert rows(conn) == expected_rows  # including `late`
     assert sum(x["late"] for x in expected_rows) == 4 and one_by_one.count("duplicate") == 1
 
 
-@pytest.mark.parametrize("change", [{"model": "m2"}, {"tokens_in": 11}, {"tokens_out": 6}, {"occurred_at": "2026-11-10T10:30:01Z"}])
+@pytest.mark.parametrize(
+    "change", [{"model": "m2"}, {"tokens_in": 11}, {"tokens_out": 6}, {"occurred_at": "2026-11-10T10:30:01Z"}]
+)
 def test_a_conflicting_key_is_409_on_both_routes(client, conn, change):
     client.post("/v1/usage", json=event())
     assert client.post("/v1/usage", json=event(**change)).status_code == 409
     r = client.post(BATCH, json=batch(event(idempotency_key="fresh"), event(**change)))
     assert r.status_code == 409
     assert "events[1]" in r.json()["detail"]
-    assert count(conn) == 1                                                 # "fresh" was rolled back with the batch
+    assert count(conn) == 1  # "fresh" was rolled back with the batch
 
 
 # --- all or nothing -----------------------------------------------------------------------------------------------
+
 
 def test_an_invalid_item_is_a_422_that_names_the_item_stores_nothing_and_echoes_nothing(client, conn):
     secret = "SECRET-VALUE-IN-BODY"
@@ -181,12 +200,15 @@ def test_an_invalid_item_is_a_422_that_names_the_item_stores_nothing_and_echoes_
     assert count(conn) == 0
 
 
-@pytest.mark.parametrize("hostile", [
-    '{"events": [{"tenant_id": "t1", "idempotency_key": "k", "model": "m", "tokens_in": NaN, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
-    '{"events": [{"tenant_id": "t1", "idempotency_key": "\\ud800", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
-    '{"events": [{"tenant_id": "t1", "idempotency_key": "a\\u0000b", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
-    '{"events": [{"tenant_id": "t1", "idempotency_key": "k", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": 5}]}',
-])
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        '{"events": [{"tenant_id": "t1", "idempotency_key": "k", "model": "m", "tokens_in": NaN, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
+        '{"events": [{"tenant_id": "t1", "idempotency_key": "\\ud800", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
+        '{"events": [{"tenant_id": "t1", "idempotency_key": "a\\u0000b", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": "2026-11-10T10:30:00Z"}]}',
+        '{"events": [{"tenant_id": "t1", "idempotency_key": "k", "model": "m", "tokens_in": 1, "tokens_out": 1, "occurred_at": 5}]}',
+    ],
+)
 def test_hostile_items_are_a_422_not_a_500(client, conn, hostile):
     assert client.post(BATCH, content=hostile, headers=JSON).status_code == 422
     assert count(conn) == 0
@@ -215,10 +237,15 @@ def test_a_key_already_stored_with_another_payload_is_a_409_naming_the_item_and_
 
 
 def test_a_key_twice_in_the_batch_with_different_payloads_is_a_409_naming_both_and_stores_nothing(client, conn):
-    r = client.post(BATCH, json=batch(event(idempotency_key="a"), event(idempotency_key="b"), event(idempotency_key="a", model="other")))
+    r = client.post(
+        BATCH,
+        json=batch(event(idempotency_key="a"), event(idempotency_key="b"), event(idempotency_key="a", model="other")),
+    )
     assert r.status_code == 409 and "events[0] and events[2]" in r.json()["detail"]
     assert count(conn) == 0
-    assert client.post(BATCH, json=batch(event(idempotency_key="a"), event(idempotency_key="b"))).status_code == 201   # nothing stuck
+    assert (
+        client.post(BATCH, json=batch(event(idempotency_key="a"), event(idempotency_key="b"))).status_code == 201
+    )  # nothing stuck
 
 
 def test_a_conflict_log_line_cannot_be_forged_by_the_key(client, conn, caplog):
@@ -230,15 +257,22 @@ def test_a_conflict_log_line_cannot_be_forged_by_the_key(client, conn, caplog):
 
 # --- hours and `late` ---------------------------------------------------------------------------------------------
 
+
 def test_events_in_a_closed_hour_are_late_and_stay_out_of_the_closed_rollup(client, conn):
     assert client.post("/v1/usage", json=event(idempotency_key="before")).status_code == 201
     assert close_hour(conn, H) == (1, 1)
-    r = client.post(BATCH, json=batch(event(idempotency_key="after-1"), event(idempotency_key="after-2", occurred_at="2026-11-10T10:59:59Z"),
-                                      event(idempotency_key="open", occurred_at="2026-11-10T11:00:00Z")))
+    r = client.post(
+        BATCH,
+        json=batch(
+            event(idempotency_key="after-1"),
+            event(idempotency_key="after-2", occurred_at="2026-11-10T10:59:59Z"),
+            event(idempotency_key="open", occurred_at="2026-11-10T11:00:00Z"),
+        ),
+    )
     assert [x["late"] for x in r.json()["results"]] == [True, True, False]
     assert conn.execute("SELECT sum(event_count) AS n FROM usage_rollups_hourly").fetchone()["n"] == 1
     again = client.post(BATCH, json=batch(event(idempotency_key="after-1")))
-    assert again.json()["results"][0]["late"] is True                    # a duplicate reports the stored flag
+    assert again.json()["results"][0]["late"] is True  # a duplicate reports the stored flag
 
 
 def test_a_batch_racing_the_close_is_never_both_and_never_neither(conn):
@@ -255,9 +289,21 @@ def test_a_batch_racing_the_close_is_never_both_and_never_neither(conn):
             def send(s):
                 client = TestClient(app, raise_server_exceptions=False)
                 start.wait(timeout=30)
-                return [client.post(BATCH, json=batch(*[event(
-                    idempotency_key=f"r{r}-s{s}-b{b}-{i}", occurred_at=(hour + timedelta(minutes=5 + i)).isoformat())
-                    for i in range(per_batch)])).status_code for b in range(batches)]
+                return [
+                    client.post(
+                        BATCH,
+                        json=batch(
+                            *[
+                                event(
+                                    idempotency_key=f"r{r}-s{s}-b{b}-{i}",
+                                    occurred_at=(hour + timedelta(minutes=5 + i)).isoformat(),
+                                )
+                                for i in range(per_batch)
+                            ]
+                        ),
+                    ).status_code
+                    for b in range(batches)
+                ]
 
             def close():
                 start.wait(timeout=30)
@@ -275,10 +321,15 @@ def test_a_batch_racing_the_close_is_never_both_and_never_neither(conn):
                 closing.result()
             assert statuses == [201] * (senders * batches)
             total = senders * batches * per_batch
-            late = conn.execute("SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s AND late", (hour,)).fetchone()["n"]
-            stored = conn.execute("SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s", (hour,)).fetchone()["n"]
-            counted = conn.execute("SELECT coalesce(sum(event_count), 0) AS n FROM usage_rollups_hourly WHERE hour_start = %s",
-                                   (hour,)).fetchone()["n"]
+            late = conn.execute(
+                "SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s AND late", (hour,)
+            ).fetchone()["n"]
+            stored = conn.execute("SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s", (hour,)).fetchone()[
+                "n"
+            ]
+            counted = conn.execute(
+                "SELECT coalesce(sum(event_count), 0) AS n FROM usage_rollups_hourly WHERE hour_start = %s", (hour,)
+            ).fetchone()["n"]
             conn.commit()
             assert counted + late == stored == total, f"round {r}: counted={counted} late={late} stored={stored}"
     finally:
@@ -292,16 +343,23 @@ def test_a_batch_spanning_two_hours_racing_a_close_of_the_second_is_never_both_a
     rng = random.Random(5)
     try:
         for r in range(rounds):
-            hour = H + timedelta(hours=10 * r)                       # the batches span `hour` and `hour + 1`
+            hour = H + timedelta(hours=10 * r)  # the batches span `hour` and `hour + 1`
             start = threading.Barrier(senders + 1)
             delay = rng.uniform(0, 0.03)
 
             def send(s):
                 client = TestClient(app, raise_server_exceptions=False)
                 start.wait(timeout=30)
-                return client.post(BATCH, json=batch(
-                    event(idempotency_key=f"r{r}-s{s}-lo", occurred_at=(hour + timedelta(minutes=10)).isoformat()),
-                    event(idempotency_key=f"r{r}-s{s}-hi", occurred_at=(hour + timedelta(hours=1, minutes=10)).isoformat()))).status_code
+                return client.post(
+                    BATCH,
+                    json=batch(
+                        event(idempotency_key=f"r{r}-s{s}-lo", occurred_at=(hour + timedelta(minutes=10)).isoformat()),
+                        event(
+                            idempotency_key=f"r{r}-s{s}-hi",
+                            occurred_at=(hour + timedelta(hours=1, minutes=10)).isoformat(),
+                        ),
+                    ),
+                ).status_code
 
             def close():
                 start.wait(timeout=30)
@@ -318,9 +376,12 @@ def test_a_batch_spanning_two_hours_racing_a_close_of_the_second_is_never_both_a
                 assert [f.result() for f in sends] == [201] * senders
                 closing.result()
             hi = hour + timedelta(hours=1)
-            late = conn.execute("SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s AND late", (hi,)).fetchone()["n"]
-            counted = conn.execute("SELECT coalesce(sum(event_count), 0) AS n FROM usage_rollups_hourly WHERE hour_start = %s",
-                                   (hi,)).fetchone()["n"]
+            late = conn.execute(
+                "SELECT count(*) AS n FROM usage_events WHERE occurred_at >= %s AND late", (hi,)
+            ).fetchone()["n"]
+            counted = conn.execute(
+                "SELECT coalesce(sum(event_count), 0) AS n FROM usage_rollups_hourly WHERE hour_start = %s", (hi,)
+            ).fetchone()["n"]
             conn.commit()
             assert counted + late == senders, f"round {r}: counted={counted} late={late}"
     finally:
@@ -344,7 +405,12 @@ def test_overlapping_batches_with_their_keys_in_opposite_order_both_finish(conn)
                 forward, backward = pool.submit(send, keys), pool.submit(send, keys[::-1])
                 codes = sorted([forward.result(timeout=60), backward.result(timeout=60)])
             assert codes in ([200, 201], [201, 201]), f"round {r}: {codes}"
-            assert conn.execute("SELECT count(*) AS n FROM usage_events WHERE idempotency_key LIKE %s", (f"r{r}-%",)).fetchone()["n"] == 400
+            assert (
+                conn.execute(
+                    "SELECT count(*) AS n FROM usage_events WHERE idempotency_key LIKE %s", (f"r{r}-%",)
+                ).fetchone()["n"]
+                == 400
+            )
             conn.commit()
     finally:
         app.dependency_overrides.clear()
@@ -366,13 +432,21 @@ def test_twenty_identical_batches_store_each_event_once(client, conn):
 
 # --- locks, timeouts, a dying database ----------------------------------------------------------------------------
 
-def test_a_batch_whose_hour_is_being_closed_gives_up_with_503_stores_nothing_and_the_resend_works(client, conn, short_wait):
+
+def test_a_batch_whose_hour_is_being_closed_gives_up_with_503_stores_nothing_and_the_resend_works(
+    client, conn, short_wait
+):
     holder = db.connect()
     try:
         holder.execute("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H + timedelta(hours=1))))
         started = time.monotonic()
-        r = client.post(BATCH, json=batch(event(idempotency_key="free", occurred_at=H.isoformat()),
-                                          event(idempotency_key="held", occurred_at=(H + timedelta(hours=1, minutes=5)).isoformat())))
+        r = client.post(
+            BATCH,
+            json=batch(
+                event(idempotency_key="free", occurred_at=H.isoformat()),
+                event(idempotency_key="held", occurred_at=(H + timedelta(hours=1, minutes=5)).isoformat()),
+            ),
+        )
         waited = time.monotonic() - started
     finally:
         holder.rollback()
@@ -410,7 +484,7 @@ def test_the_database_unreachable_is_503(client, monkeypatch):
 
 
 def test_the_database_dying_mid_batch_is_503_stores_nothing_and_the_resend_works(client, conn):
-    holder = db.connect()                       # a close in progress: the batch waits for the hour's exclusive lock
+    holder = db.connect()  # a close in progress: the batch waits for the hour's exclusive lock
     try:
         holder.execute("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H)))
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -419,7 +493,8 @@ def test_the_database_dying_mid_batch_is_503_stores_nothing_and_the_resend_works
                 wait_until_blocked(conn)
                 conn.execute(
                     "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
-                    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")
+                    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+                )
                 conn.commit()
                 assert posting.result(timeout=10).status_code == 503
             finally:
@@ -437,13 +512,20 @@ def test_the_database_killed_after_some_hours_are_locked_stores_nothing(client, 
     try:
         holder.execute("SELECT pg_advisory_xact_lock(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H + timedelta(hours=1))))
         with ThreadPoolExecutor(max_workers=1) as pool:
-            posting = pool.submit(client.post, BATCH, json=batch(
-                event(idempotency_key="a", occurred_at=H.isoformat()), event(idempotency_key="b", occurred_at=(H + timedelta(hours=1)).isoformat())))
+            posting = pool.submit(
+                client.post,
+                BATCH,
+                json=batch(
+                    event(idempotency_key="a", occurred_at=H.isoformat()),
+                    event(idempotency_key="b", occurred_at=(H + timedelta(hours=1)).isoformat()),
+                ),
+            )
             try:
                 wait_until_blocked(conn)
                 conn.execute(
                     "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
-                    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")
+                    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+                )
                 conn.commit()
                 assert posting.result(timeout=10).status_code == 503
             finally:
@@ -457,7 +539,9 @@ def test_the_database_killed_after_some_hours_are_locked_stores_nothing(client, 
 def test_every_hour_lock_is_its_own_statement_in_ascending_order_before_the_insert(client, conn, monkeypatch):
     seen = []
     original = ingest.lock_hour_shared
-    monkeypatch.setattr(ingest, "lock_hour_shared", lambda c, ts: (seen.append(("lock", hour_index(ts))), original(c, ts)))
+    monkeypatch.setattr(
+        ingest, "lock_hour_shared", lambda c, ts: (seen.append(("lock", hour_index(ts))), original(c, ts))
+    )
     real_execute = psycopg.Connection.execute
 
     def spy(self, query, *args, **kwargs):
@@ -467,12 +551,15 @@ def test_every_hour_lock_is_its_own_statement_in_ascending_order_before_the_inse
 
     monkeypatch.setattr(psycopg.Connection, "execute", spy)
     hours = [H + timedelta(hours=h) for h in (5, 1, 3, 1)]
-    r = client.post(BATCH, json=batch(*[event(idempotency_key=f"k{i}", occurred_at=h.isoformat()) for i, h in enumerate(hours)]))
+    r = client.post(
+        BATCH, json=batch(*[event(idempotency_key=f"k{i}", occurred_at=h.isoformat()) for i, h in enumerate(hours)])
+    )
     assert r.status_code == 201
     assert seen == [("lock", hour_index(H) + n) for n in (1, 3, 5)] + [("insert",)]
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
+
 
 def test_a_body_that_is_not_json_is_a_422(client, conn):
     assert client.post(BATCH, content=b"[1, 2", headers=JSON).status_code == 422 and count(conn) == 0
@@ -490,7 +577,12 @@ def test_1001_events_is_a_422_and_1000_is_not(client, conn):
 
 def test_49_distinct_hours_is_a_422_and_48_is_not(client, conn):
     def spread(n):
-        return batch(*[event(idempotency_key=f"k{i}", occurred_at=(H + timedelta(hours=i % n, minutes=i // n)).isoformat()) for i in range(96)])
+        return batch(
+            *[
+                event(idempotency_key=f"k{i}", occurred_at=(H + timedelta(hours=i % n, minutes=i // n)).isoformat())
+                for i in range(96)
+            ]
+        )
 
     r = client.post(BATCH, json=spread(49))
     assert r.status_code == 422 and "49 UTC hours" in r.text and count(conn) == 0
@@ -498,12 +590,25 @@ def test_49_distinct_hours_is_a_422_and_48_is_not(client, conn):
 
 
 def test_hours_are_counted_in_utc_not_in_the_offset_the_client_wrote(client, conn):
-    same_instant_hours = [event(idempotency_key=f"k{i}", occurred_at=f"2026-11-10T{10 + i % 5:02d}:30:00+0{i % 5}:00") for i in range(60)]
-    assert client.post(BATCH, json=batch(*same_instant_hours)).status_code == 201     # every one is 10:30 UTC: one hour
+    same_instant_hours = [
+        event(idempotency_key=f"k{i}", occurred_at=f"2026-11-10T{10 + i % 5:02d}:30:00+0{i % 5}:00") for i in range(60)
+    ]
+    assert client.post(BATCH, json=batch(*same_instant_hours)).status_code == 201  # every one is 10:30 UTC: one hour
 
 
-@pytest.mark.parametrize("body", [{"events": []}, {}, {"events": "x"}, {"events": {"a": 1}}, {"events": None}, [event()],
-                                  {"events": [None]}, {"events": [[]]}])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"events": []},
+        {},
+        {"events": "x"},
+        {"events": {"a": 1}},
+        {"events": None},
+        [event()],
+        {"events": [None]},
+        {"events": [[]]},
+    ],
+)
 def test_an_empty_missing_or_malformed_events_list_is_a_422(client, conn, body):
     r = client.post(BATCH, content=json.dumps(body).encode(), headers=JSON)
     assert r.status_code == 422 and count(conn) == 0
@@ -513,18 +618,26 @@ def maximal_events():
     """MAX_BATCH_EVENTS events of the longest valid spelling: 200 non-BMP characters in each text field, distinct keys."""
     out = []
     for i in range(ingest.MAX_BATCH_EVENTS):
-        key = chr(0x1F600 + i // 40) + chr(0x1F600 + i % 40) + "\U0001F600" * 198
-        out.append({"tenant_id": "\U0001F600" * 200, "idempotency_key": key, "model": "\U0001F600" * 200,
-                    "tokens_in": 10**12, "tokens_out": 10**12, "occurred_at": "9999-12-31T23:59:59.999999+23:59"})
+        key = chr(0x1F600 + i // 40) + chr(0x1F600 + i % 40) + "\U0001f600" * 198
+        out.append(
+            {
+                "tenant_id": "\U0001f600" * 200,
+                "idempotency_key": key,
+                "model": "\U0001f600" * 200,
+                "tokens_in": 10**12,
+                "tokens_out": 10**12,
+                "occurred_at": "9999-12-31T23:59:59.999999+23:59",
+            }
+        )
     return out
 
 
 def test_the_cap_is_the_size_of_a_thousand_of_the_largest_valid_events():
-    body = json.dumps({"events": maximal_events()}).encode()            # ASCII-escaped, default separators
+    body = json.dumps({"events": maximal_events()}).encode()  # ASCII-escaped, default separators
     assert len(body) == ingest.MAX_BATCH_BODY_BYTES
-    assert len(ingest.UsageBatch.model_validate_json(body).events) == ingest.MAX_BATCH_EVENTS     # every one of them valid
+    assert len(ingest.UsageBatch.model_validate_json(body).events) == ingest.MAX_BATCH_EVENTS  # every one of them valid
     compact = json.dumps({"events": maximal_events()}, separators=(",", ":"), ensure_ascii=False).encode()
-    assert len(compact) < ingest.MAX_BATCH_BODY_BYTES                                             # other encodings are smaller
+    assert len(compact) < ingest.MAX_BATCH_BODY_BYTES  # other encodings are smaller
 
 
 def test_a_body_of_exactly_the_cap_is_201_and_one_byte_more_is_413(client, conn):
@@ -535,12 +648,17 @@ def test_a_body_of_exactly_the_cap_is_201_and_one_byte_more_is_413(client, conn)
     padded = raw + b" " * (ingest.MAX_BATCH_BODY_BYTES - len(raw))
     assert client.post(BATCH, content=padded, headers=JSON).status_code == 201
     assert client.post(BATCH, content=padded + b" ", headers=JSON).status_code == 413
-    assert client.post(BATCH, content=(padded[i:i + 65536] for i in range(0, len(padded) + 1, 65536)), headers=JSON).status_code == 200
+    assert (
+        client.post(
+            BATCH, content=(padded[i : i + 65536] for i in range(0, len(padded) + 1, 65536)), headers=JSON
+        ).status_code
+        == 200
+    )
     assert count(conn) == 3
 
 
 def test_the_largest_valid_events_are_stored_resent_and_rolled_up_by_a_batch(conn):
-    app.dependency_overrides[require_entitlement] = lambda: "\U0001F600" * 200
+    app.dependency_overrides[require_entitlement] = lambda: "\U0001f600" * 200
     try:
         client = TestClient(app, raise_server_exceptions=False)
         body = {"events": maximal_events()[:10]}
@@ -554,13 +672,15 @@ def test_the_largest_valid_events_are_stored_resent_and_rolled_up_by_a_batch(con
 
 def test_the_body_cap_is_a_413_before_parsing_and_before_the_edge(conn):
     cap = ingest.MAX_BATCH_BODY_BYTES
-    client = TestClient(app, raise_server_exceptions=False)                     # no override: no credentials
+    client = TestClient(app, raise_server_exceptions=False)  # no override: no credentials
     declared = client.post(BATCH, content=b"{}", headers={**JSON, "content-length": str(cap + 1)})
     assert (declared.status_code, declared.json()) == (413, {"detail": "request body too large"})
-    streamed = client.post(BATCH, content=(b" " * 65536 for _ in range(cap // 65536 + 2)), headers=JSON)   # no Content-Length
+    streamed = client.post(
+        BATCH, content=(b" " * 65536 for _ in range(cap // 65536 + 2)), headers=JSON
+    )  # no Content-Length
     assert streamed.status_code == 413
     assert client.post(BATCH, content=b" " * (cap + 1), headers=JSON).status_code == 413
-    assert client.post(BATCH, json=batch(event())).status_code == 401           # a small body reaches the edge
+    assert client.post(BATCH, json=batch(event())).status_code == 401  # a small body reaches the edge
     assert count(conn) == 0
 
 
@@ -583,7 +703,12 @@ def test_both_routes_decide_a_resend_with_the_same_comparison():
     stored = {"model": "m1", "tokens_in": 10, "tokens_out": 5, "occurred_at": ingest.UsageEvent(**event()).occurred_at}
     same = ingest.UsageEvent(**event(occurred_at="2026-11-10T11:30:00+01:00"))
     assert ingest._same_payload(stored, same)
-    for change in ({"model": "m2"}, {"tokens_in": 11}, {"tokens_out": 6}, {"occurred_at": "2026-11-10T10:30:00.000001Z"}):
+    for change in (
+        {"model": "m2"},
+        {"tokens_in": 11},
+        {"tokens_out": 6},
+        {"occurred_at": "2026-11-10T10:30:00.000001Z"},
+    ):
         assert not ingest._same_payload(stored, ingest.UsageEvent(**event(**change)))
 
 
@@ -603,6 +728,8 @@ def test_a_batch_that_repeats_a_key_with_a_different_payload_never_reaches_the_d
 
 
 def test_the_first_copy_of_a_repeated_key_is_the_one_stored(client, conn):
-    r = client.post(BATCH, json=batch(event(occurred_at="2026-11-10T11:30:00+01:00"), event(occurred_at="2026-11-10T10:30:00Z")))
+    r = client.post(
+        BATCH, json=batch(event(occurred_at="2026-11-10T11:30:00+01:00"), event(occurred_at="2026-11-10T10:30:00Z"))
+    )
     assert [x["status"] for x in r.json()["results"]] == ["accepted", "duplicate"]
     assert rows(conn)[0]["occurred_at"].isoformat() == "2026-11-10T10:30:00+00:00" and count(conn) == 1

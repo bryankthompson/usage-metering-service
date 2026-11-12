@@ -20,7 +20,11 @@ def _collect(env):
     # --collect-only: no test or fixture runs, so nothing can be truncated even if the guard is broken.
     return subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests/test_scaffold.py"],
-        env=env, capture_output=True, text=True, timeout=120)
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
 
 def test_pytest_exits_2_without_database_url():

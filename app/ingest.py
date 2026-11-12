@@ -3,6 +3,7 @@
 POST /v1/usage stores one event in the append-only `usage_events` log. A resend of the same
 (tenant_id, idempotency_key) is counted once. The route sits behind `require_entitlement`.
 """
+
 import json
 import logging
 from datetime import timezone
@@ -23,7 +24,7 @@ from app.rollup import hour_index, lock_hour_shared
 # is logged with %r: a newline in it must not start a fake log line.
 log = logging.getLogger("uvicorn.error")
 
-MAX_BODY_BYTES = 64 * 1024      # an event is a few hundred bytes; app/bodylimit.py refuses more with 413 before parsing it
+MAX_BODY_BYTES = 64 * 1024  # an event is a few hundred bytes; app/bodylimit.py refuses more with 413 before parsing it
 
 
 class QuietValidationRoute(APIRoute):
@@ -114,7 +115,11 @@ class UsageEvent(BaseModel):
 def _same_payload(stored, event: UsageEvent) -> bool:
     """Is a stored row (or a dict with the same four keys) the same event as `event`? Both routes decide a resend with this."""
     return (stored["model"], stored["tokens_in"], stored["tokens_out"], stored["occurred_at"]) == (
-        event.model, event.tokens_in, event.tokens_out, event.occurred_at)
+        event.model,
+        event.tokens_in,
+        event.tokens_out,
+        event.occurred_at,
+    )
 
 
 def _unavailable(err: psycopg.OperationalError) -> HTTPException:
@@ -144,15 +149,20 @@ def ingest_usage(
 
 def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Connection) -> dict[str, str | int | bool]:
     params = event.model_dump()
-    db.limit_lock_wait(conn)        # a held hour lock is a 503 after db.LOCK_WAIT, not a pinned worker thread
+    db.limit_lock_wait(conn)  # a held hour lock is a 503 after db.LOCK_WAIT, not a pinned worker thread
     # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
     # insert that arrives while the hour is closing waits for the close and then sees it as closed.
     lock_hour_shared(conn, event.occurred_at)
     inserted = conn.execute(INSERT_EVENT, params).fetchone()
     if inserted is not None:
         conn.commit()
-        log.info("usage accepted: tenant=%s key=%r event_id=%s late=%s",
-                 tenant, event.idempotency_key, inserted["id"], inserted["late"])
+        log.info(
+            "usage accepted: tenant=%s key=%r event_id=%s late=%s",
+            tenant,
+            event.idempotency_key,
+            inserted["id"],
+            inserted["late"],
+        )
         return {"status": "accepted", "event_id": inserted["id"], "late": inserted["late"]}
 
     # The key already exists. Read it back (the row is committed: the INSERT waited for any
@@ -160,14 +170,22 @@ def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Con
     existing = conn.execute(SELECT_EVENT, params).fetchone()
     conn.commit()
     if not _same_payload(existing, event):
-        log.warning("usage conflict: tenant=%s key=%r reused with a different payload (event_id=%s)",
-                    tenant, event.idempotency_key, existing["id"])
+        log.warning(
+            "usage conflict: tenant=%s key=%r reused with a different payload (event_id=%s)",
+            tenant,
+            event.idempotency_key,
+            existing["id"],
+        )
         raise HTTPException(status_code=409, detail="idempotency_key was already used with a different payload")
-    log.info("usage duplicate: tenant=%s key=%r event_id=%s late=%s",
-             tenant, event.idempotency_key, existing["id"], existing["late"])
+    log.info(
+        "usage duplicate: tenant=%s key=%r event_id=%s late=%s",
+        tenant,
+        event.idempotency_key,
+        existing["id"],
+        existing["late"],
+    )
     response.status_code = 200
     return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}
-
 
 
 # --- POST /v1/usage/batch -------------------------------------------------------------------------------------------
@@ -188,14 +206,22 @@ def _largest_event_json() -> str:
     as UTF-8, 12 as the \\ud83d\\ude00 escape Python's json.dumps writes), the largest token counts, the longest
     timestamp spelling (6 fractional digits, a +hh:mm offset). Extra fractional digits or whitespace make a body larger
     but are padding, not data; like the single route's cap, the batch cap refuses them with 413."""
-    return json.dumps({
-        "tenant_id": "\U0001F600" * MAX_TEXT, "idempotency_key": "\U0001F600" * MAX_TEXT, "model": "\U0001F600" * MAX_TEXT,
-        "tokens_in": MAX_TOKENS, "tokens_out": MAX_TOKENS, "occurred_at": "9999-12-31T23:59:59.999999+23:59"})
+    return json.dumps(
+        {
+            "tenant_id": "\U0001f600" * MAX_TEXT,
+            "idempotency_key": "\U0001f600" * MAX_TEXT,
+            "model": "\U0001f600" * MAX_TEXT,
+            "tokens_in": MAX_TOKENS,
+            "tokens_out": MAX_TOKENS,
+            "occurred_at": "9999-12-31T23:59:59.999999+23:59",
+        }
+    )
 
 
 # MAX_BATCH_EVENTS of those in json.dumps's default spacing, in the {"events": [...]} envelope: one byte more is 413.
-MAX_BATCH_BODY_BYTES = (len('{"events": []}') + MAX_BATCH_EVENTS * len(_largest_event_json())
-                        + (MAX_BATCH_EVENTS - 1) * len(", "))
+MAX_BATCH_BODY_BYTES = (
+    len('{"events": []}') + MAX_BATCH_EVENTS * len(_largest_event_json()) + (MAX_BATCH_EVENTS - 1) * len(", ")
+)
 
 
 class UsageBatch(BaseModel):
@@ -239,7 +265,9 @@ def ingest_usage_batch(
     events = batch.events
     for i, event in enumerate(events):
         if event.tenant_id != tenant:
-            log.warning("usage batch rejected: item %d body tenant %r is not the entitled tenant %r", i, event.tenant_id, tenant)
+            log.warning(
+                "usage batch rejected: item %d body tenant %r is not the entitled tenant %r", i, event.tenant_id, tenant
+            )
             raise HTTPException(status_code=403, detail=f"events[{i}].tenant_id does not match the entitled tenant")
     # A key sent twice in the batch is one event: the first copy is stored, a later identical copy is its duplicate, a
     # later different copy is a conflict. Decided here, not by the INSERT, which would pick an arbitrary copy.
@@ -247,18 +275,32 @@ def ingest_usage_batch(
     for i, event in enumerate(events):
         j = first.setdefault(event.idempotency_key, i)
         if j != i and not _same_payload(events[j].model_dump(), event):
-            log.warning("usage batch conflict: tenant=%s items %d and %d share key %r with different payloads",
-                        tenant, j, i, event.idempotency_key)
-            raise HTTPException(status_code=409, detail=f"events[{j}] and events[{i}] use the same idempotency_key with different payloads")
+            log.warning(
+                "usage batch conflict: tenant=%s items %d and %d share key %r with different payloads",
+                tenant,
+                j,
+                i,
+                event.idempotency_key,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"events[{j}] and events[{i}] use the same idempotency_key with different payloads",
+            )
     try:
-        with db.request_connection() as conn:      # leaving the block on an exception rolls the whole batch back
+        with db.request_connection() as conn:  # leaving the block on an exception rolls the whole batch back
             results = _store_batch(events, first, tenant, conn)
     except psycopg.errors.QueryCanceled:
         raise
     except psycopg.OperationalError as err:
         raise _unavailable(err) from err
     accepted = sum(r["status"] == "accepted" for r in results)
-    log.info("usage batch: tenant=%s events=%d accepted=%d duplicate=%d", tenant, len(results), accepted, len(results) - accepted)
+    log.info(
+        "usage batch: tenant=%s events=%d accepted=%d duplicate=%d",
+        tenant,
+        len(results),
+        accepted,
+        len(results) - accepted,
+    )
     if not accepted:
         response.status_code = 200
     return {"accepted": accepted, "duplicate": len(results) - accepted, "results": results}
@@ -275,23 +317,47 @@ def _store_batch(events: list[UsageEvent], first: dict[str, int], tenant: str, c
     firsts = [events[i] for i in first.values()]
     # The instants go in as UTC: an array literal is sent as text, and Postgres refuses a text offset past +-15:59 (the
     # single route sends a datetime as a binary value and has no such limit).
-    inserted = {row["idempotency_key"]: row for row in conn.execute(INSERT_BATCH, {
-        "tenant_ids": [e.tenant_id for e in firsts], "keys": [e.idempotency_key for e in firsts],
-        "models": [e.model for e in firsts], "tokens_in": [e.tokens_in for e in firsts],
-        "tokens_out": [e.tokens_out for e in firsts],
-        "occurred_at": [e.occurred_at.astimezone(timezone.utc) for e in firsts]}).fetchall()}
+    inserted = {
+        row["idempotency_key"]: row
+        for row in conn.execute(
+            INSERT_BATCH,
+            {
+                "tenant_ids": [e.tenant_id for e in firsts],
+                "keys": [e.idempotency_key for e in firsts],
+                "models": [e.model for e in firsts],
+                "tokens_in": [e.tokens_in for e in firsts],
+                "tokens_out": [e.tokens_out for e in firsts],
+                "occurred_at": [e.occurred_at.astimezone(timezone.utc) for e in firsts],
+            },
+        ).fetchall()
+    }
     # A key that did not insert already exists: read those back in one query and compare, exactly as the single route does.
     missing = [e for e in firsts if e.idempotency_key not in inserted]
-    stored = {row["idempotency_key"]: row for row in conn.execute(SELECT_BATCH_KEYS, {
-        "tenant_id": tenant, "keys": [e.idempotency_key for e in missing]}).fetchall()}
+    stored = {
+        row["idempotency_key"]: row
+        for row in conn.execute(
+            SELECT_BATCH_KEYS, {"tenant_id": tenant, "keys": [e.idempotency_key for e in missing]}
+        ).fetchall()
+    }
     for e in missing:
         if not _same_payload(stored[e.idempotency_key], e):
             i = first[e.idempotency_key]
-            log.warning("usage batch conflict: tenant=%s item %d key=%r reused with a different payload (event_id=%s)",
-                        tenant, i, e.idempotency_key, stored[e.idempotency_key]["id"])
-            raise HTTPException(status_code=409, detail=f"events[{i}]: idempotency_key was already used with a different payload")
-    return [{"idempotency_key": e.idempotency_key,
-             "status": "accepted" if first[e.idempotency_key] == i and e.idempotency_key in inserted else "duplicate",
-             "event_id": (inserted.get(e.idempotency_key) or stored[e.idempotency_key])["id"],
-             "late": (inserted.get(e.idempotency_key) or stored[e.idempotency_key])["late"]}
-            for i, e in enumerate(events)]
+            log.warning(
+                "usage batch conflict: tenant=%s item %d key=%r reused with a different payload (event_id=%s)",
+                tenant,
+                i,
+                e.idempotency_key,
+                stored[e.idempotency_key]["id"],
+            )
+            raise HTTPException(
+                status_code=409, detail=f"events[{i}]: idempotency_key was already used with a different payload"
+            )
+    return [
+        {
+            "idempotency_key": e.idempotency_key,
+            "status": "accepted" if first[e.idempotency_key] == i and e.idempotency_key in inserted else "duplicate",
+            "event_id": (inserted.get(e.idempotency_key) or stored[e.idempotency_key])["id"],
+            "late": (inserted.get(e.idempotency_key) or stored[e.idempotency_key])["late"],
+        }
+        for i, e in enumerate(events)
+    ]

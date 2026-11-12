@@ -4,6 +4,7 @@ for as long as the lock is held (RT-concurrency-2: ~40 waiters on one hour's loc
 Each test holds a lock from a second connection. A safety timer releases it after a few seconds, so that without the
 timeout a test fails on a wrong answer instead of hanging.
 """
+
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -65,14 +66,17 @@ def test_ingest_gives_up_on_a_held_hour_lock_with_503_and_a_resend_is_stored_onc
         waited = time.monotonic() - started
     assert (r.status_code, r.json(), r.headers.get("retry-after")) == (503, {"detail": "database unavailable"}, "1")
     assert 0.25 <= waited < 3
-    assert count(conn) == 0                                                       # the failed attempt stored nothing
+    assert count(conn) == 0  # the failed attempt stored nothing
     assert client.post("/v1/usage", json=event()).status_code == 201 and count(conn) == 1
     assert client.post("/v1/usage", json=event()).status_code == 200 and count(conn) == 1
 
 
 def test_many_waiters_on_one_hour_do_not_hang_healthz_or_another_hour(client, conn, monkeypatch):
     monkeypatch.setattr(db, "LOCK_WAIT", "400ms", raising=False)
-    with held(*HOUR_LOCK, release_after=6.0), TestClient(app, raise_server_exceptions=False) as shared:  # one shared thread pool
+    with (
+        held(*HOUR_LOCK, release_after=6.0),
+        TestClient(app, raise_server_exceptions=False) as shared,
+    ):  # one shared thread pool
         with ThreadPoolExecutor(max_workers=60) as pool:
             waiters = [pool.submit(shared.post, "/v1/usage", json=event(idempotency_key=f"k{i}")) for i in range(60)]
             wait_until_blocked(conn)
@@ -93,7 +97,7 @@ def test_healthz_answers_while_every_worker_thread_is_parked_in_the_database(cli
     with held(*HOUR_LOCK, release_after=5.0), TestClient(app, raise_server_exceptions=False) as shared:
         with ThreadPoolExecutor(max_workers=50) as pool:
             senders = [pool.submit(shared.post, "/v1/usage", json=event(idempotency_key=f"k{i}")) for i in range(50)]
-            for _ in range(500):                                  # all 40 pool threads are inside the database wait
+            for _ in range(500):  # all 40 pool threads are inside the database wait
                 if blocked(conn, "advisory") >= 40:
                     break
                 time.sleep(0.01)
@@ -105,7 +109,7 @@ def test_healthz_answers_while_every_worker_thread_is_parked_in_the_database(cli
             statuses = {s.result(timeout=20).status_code for s in senders}
     assert health.status_code == 200 and health.json() == {"status": "ok"}
     assert answered_in < 1, f"/healthz waited {answered_in:.1f} s behind requests parked in the database"
-    assert statuses == {201}                                      # the parked requests finished normally once the lock went
+    assert statuses == {201}  # the parked requests finished normally once the lock went
 
 
 @pytest.fixture
@@ -122,8 +126,9 @@ def test_a_webhook_gives_up_on_a_held_tenant_lock_and_the_redelivery_is_applied_
         waited = time.monotonic() - started
     assert (r.status_code, r.json(), r.headers.get("retry-after")) == (503, {"detail": "database unavailable"}, "1")
     assert 0.25 <= waited < 3
-    assert conn.execute("SELECT (SELECT count(*) FROM entitlements) AS e, (SELECT count(*) FROM stripe_events) AS s"
-                        ).fetchone() == {"e": 0, "s": 0}                          # nothing of the failed attempt remains
+    assert conn.execute(
+        "SELECT (SELECT count(*) FROM entitlements) AS e, (SELECT count(*) FROM stripe_events) AS s"
+    ).fetchone() == {"e": 0, "s": 0}  # nothing of the failed attempt remains
     assert post(webhook_env, subscription_event("evt_1", T)).json() == {"status": "processed"}
     assert post(webhook_env, subscription_event("evt_1", T)).json() == {"status": "duplicate"}
 
@@ -145,7 +150,7 @@ def test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight(conn, mo
         with held("SELECT pg_advisory_xact_lock_shared(%s, %s)", (HOUR_LOCK_CLASS, hour_index(H))) as ingest_in_flight:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 closing = pool.submit(close_hour, closer, H)
-                time.sleep(0.6)                                                   # six times the ingest side's wait
+                time.sleep(0.6)  # six times the ingest side's wait
                 assert not closing.done(), "close_hour gave up waiting for an ingest in flight"
                 ingest_in_flight.rollback()
                 assert closing.result(timeout=5) == (0, 0)

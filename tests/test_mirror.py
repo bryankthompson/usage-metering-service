@@ -1,6 +1,7 @@
 """The ClickHouse mirror against a stand-in HTTP server (no real ClickHouse): the request it builds, that a failing or
 absent ClickHouse never fails the close, and that backfill sends only hours that differ. The real thing was run by hand
 (docs/clickhouse.md)."""
+
 import json
 import logging
 import socket
@@ -36,8 +37,12 @@ class StandIn:
                         r = json.loads(line)
                         standin.rows[(r["tenant_id"], r["model"], r["hour_start"])] = r
                 elif standin.status == 200 and query.startswith("SELECT"):
-                    ts = lambda s: int(datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
-                    out = "\n".join(json.dumps({**r, "ts": str(ts(r["hour_start"]))}) for r in standin.rows.values()).encode()
+                    ts = lambda s: int(
+                        datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                    )
+                    out = "\n".join(
+                        json.dumps({**r, "ts": str(ts(r["hour_start"]))}) for r in standin.rows.values()
+                    ).encode()
                 self.send_response(standin.status)
                 self.end_headers()
                 self.wfile.write(out if standin.status == 200 else b"boom")
@@ -72,12 +77,26 @@ def two_rows(conn):
 def test_close_sends_the_rollup_rows_as_one_json_each_row_insert(conn, ch):
     two_rows(conn)
     close_hour(conn, H)
-    (query, body), = ch.inserts()
+    ((query, body),) = ch.inserts()
     assert query == "INSERT INTO usage_rollups_hourly FORMAT JSONEachRow"
     sent = sorted((json.loads(line) for line in body.splitlines()), key=lambda r: r["tenant_id"])
     assert [{k: v for k, v in r.items() if k != "version"} for r in sent] == [
-        {"tenant_id": "t1", "model": "mA", "hour_start": "2026-11-10 10:00:00", "tokens_in": 10, "tokens_out": 1, "event_count": 1},
-        {"tenant_id": "t2", "model": "mB", "hour_start": "2026-11-10 10:00:00", "tokens_in": 7, "tokens_out": 3, "event_count": 1},
+        {
+            "tenant_id": "t1",
+            "model": "mA",
+            "hour_start": "2026-11-10 10:00:00",
+            "tokens_in": 10,
+            "tokens_out": 1,
+            "event_count": 1,
+        },
+        {
+            "tenant_id": "t2",
+            "model": "mB",
+            "hour_start": "2026-11-10 10:00:00",
+            "tokens_in": 7,
+            "tokens_out": 3,
+            "event_count": 1,
+        },
     ]
     assert any("ReplacingMergeTree(version)" in q for q, _ in ch.requests)  # the table is created first
 
@@ -126,7 +145,7 @@ def test_backfill_sends_only_hours_that_differ_and_a_second_run_sends_nothing(co
     key = next(k for k in ch.rows if k[0] == "t1")
     ch.rows[key]["tokens_in"] = 999
     assert mirror.backfill(conn, ch.url) == (1, [])
-    (query, body), = ch.inserts()
+    ((query, body),) = ch.inserts()
     assert {json.loads(line)["hour_start"] for line in body.splitlines()} == {"2026-11-10 10:00:00"}
     assert len(body.splitlines()) == 2  # the whole hour, both rows
     ch.requests.clear()
@@ -149,13 +168,21 @@ def test_export_actuals_writes_the_lines_reconcile_reads(conn, ch, tmp_path):
     path = tmp_path / "actuals.jsonl"
     assert mirror.export_actuals(conn, ch.url, str(path)) == (2, [])
     from app.reconcile import read_actuals
+
     assert read_actuals(str(path)) == {("t1", "mA", H): (10, 1), ("t2", "mB", H): (7, 3)}
 
 
 def test_export_names_clickhouse_only_hours_on_stderr_and_exits_1(conn, ch, tmp_path, capsys):
     two_rows(conn)
     close_hour(conn, H)
-    stray = {"tenant_id": "t9", "model": "mZ", "hour_start": "2026-11-10 03:00:00", "tokens_in": 1, "tokens_out": 1, "event_count": 1}
+    stray = {
+        "tenant_id": "t9",
+        "model": "mZ",
+        "hour_start": "2026-11-10 03:00:00",
+        "tokens_in": 1,
+        "tokens_out": 1,
+        "event_count": 1,
+    }
     ch.rows[("t9", "mZ", stray["hour_start"])] = stray  # in ClickHouse, hour never closed in Postgres
     path = tmp_path / "actuals.jsonl"
     with pytest.raises(SystemExit) as exit_:

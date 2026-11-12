@@ -1,4 +1,5 @@
 """One poisoned hour must not block the hours after it, and must be visible."""
+
 import logging
 from datetime import datetime, timezone
 
@@ -78,9 +79,17 @@ def test_closing_hours_out_of_order_does_not_make_a_later_event_late(conn, monke
     close_due_hours(conn, NOW)  # hours 9 and 10 closed, 8 still open
     app.dependency_overrides[require_entitlement] = lambda: "t1"
     try:
-        resp = TestClient(app).post("/v1/usage", json={
-            "tenant_id": "t1", "idempotency_key": "new", "model": "mA", "tokens_in": 1, "tokens_out": 1,
-            "occurred_at": "2026-11-10T08:45:00Z"})
+        resp = TestClient(app).post(
+            "/v1/usage",
+            json={
+                "tenant_id": "t1",
+                "idempotency_key": "new",
+                "model": "mA",
+                "tokens_in": 1,
+                "tokens_out": 1,
+                "occurred_at": "2026-11-10T08:45:00Z",
+            },
+        )
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 201
@@ -117,7 +126,9 @@ def test_every_keeps_looping_after_a_failed_hour(conn, monkeypatch, capsys):
     with pytest.raises(StopLoop):
         rollup.main(["--every", "60"])
     assert sleeps == [60, 60]
-    assert capsys.readouterr().out.count("failed 1: 2026-11-10T08:00:00+00:00") == 2  # one failure line per completed cycle
+    assert (
+        capsys.readouterr().out.count("failed 1: 2026-11-10T08:00:00+00:00") == 2
+    )  # one failure line per completed cycle
 
 
 def kill_connection_of_hour_8(monkeypatch, victim_hour=POISON):

@@ -11,6 +11,7 @@ GET /v1/tenants/{id}/charges. Any mismatch prints both numbers and exits 1; so d
 
 Runs on the host like scripts/demo.sh: psql, the rollup and reconcile go through `docker compose exec`.
 """
+
 import argparse
 import hashlib
 import hmac
@@ -27,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import seekrflow  # noqa: E402  (standard library only; the repo root must be on the path first)
 
-SECRET = "whsec_test_only_not_a_real_secret"   # the fake secret from compose.yaml
+SECRET = "whsec_test_only_not_a_real_secret"  # the fake secret from compose.yaml
 LARGE_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
 EMBED_MODEL = "BAAI/bge-large-en-v1.5"
 # kind -> (model id asked of the inference server, price versions: (effective_from offset from the first hour, in, out per 1k))
@@ -51,6 +52,7 @@ class Fail(Exception):
 
 # ---- the independent check: pure, no Docker, no database ----
 
+
 def price_in_force(versions: list[dict], at: datetime) -> dict:
     """The version with the greatest effective_from at or before `at`; a tie goes to the later version."""
     live = [v for v in versions if v["effective_from"] <= at]
@@ -68,8 +70,12 @@ def expected_lines(usage: dict, prices: dict) -> dict:
     for (model, hour), (tokens_in, tokens_out) in usage.items():
         version = price_in_force(prices[model], hour)
         exact_thousandths = tokens_in * version["input"] + tokens_out * version["output"]
-        lines[(model, hour)] = {"tokens_in": tokens_in, "tokens_out": tokens_out, "version": version["version"],
-                                "micros": (exact_thousandths + 500) // 1000}
+        lines[(model, hour)] = {
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "version": version["version"],
+            "micros": (exact_thousandths + 500) // 1000,
+        }
     return lines
 
 
@@ -79,6 +85,7 @@ def expected_total(lines: dict) -> int:
 
 # ---- the stack ----
 
+
 def run(cmd: list[str]) -> str:
     done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
@@ -87,8 +94,25 @@ def run(cmd: list[str]) -> str:
 
 
 def psql(sql: str) -> str:
-    return run(["docker", "compose", "exec", "-T", "db", "psql", "-U", "metering", "-d", "metering", "-tAq",
-                "-v", "ON_ERROR_STOP=1", "-c", sql]).strip()
+    return run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "db",
+            "psql",
+            "-U",
+            "metering",
+            "-d",
+            "metering",
+            "-tAq",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            sql,
+        ]
+    ).strip()
 
 
 def http(method: str, url: str, headers: dict, data: bytes | None = None) -> tuple[int, dict]:
@@ -113,11 +137,14 @@ def expect(what: str, got, want) -> None:
 
 
 def webhook(api: str, event_id: str, kind: str, obj: dict, created: int) -> None:
-    payload = json.dumps({"id": event_id, "object": "event", "type": kind, "created": created,
-                          "data": {"object": obj}}).encode()
+    payload = json.dumps(
+        {"id": event_id, "object": "event", "type": kind, "created": created, "data": {"object": obj}}
+    ).encode()
     now = int(time.time())
     signature = f"t={now},v1=" + hmac.new(SECRET.encode(), f"{now}.".encode() + payload, hashlib.sha256).hexdigest()
-    status, body = http("POST", f"{api}/v1/stripe/webhook", {"Content-Type": "application/json", "Stripe-Signature": signature}, payload)
+    status, body = http(
+        "POST", f"{api}/v1/stripe/webhook", {"Content-Type": "application/json", "Stripe-Signature": signature}, payload
+    )
     expect(f"webhook {kind} for {event_id}", (status, body.get("status")), (200, "processed"))
 
 
@@ -136,18 +163,23 @@ def open_hours() -> datetime:
 def closed_message(hour: datetime, during_rollup: bool, output: str = "") -> str:
     """Why a scenario hour is closed. The compose rollup worker (--every 3600) can close it before our own rollup runs."""
     if during_rollup:
-        return (f"{hour.isoformat()} is closed, but not by this script's rollup: the rollup worker closed it first, so the "
-                f"expected charges (which assume our events landed before the close) cannot hold. Re-run.\n{output}")
+        return (
+            f"{hour.isoformat()} is closed, but not by this script's rollup: the rollup worker closed it first, so the "
+            f"expected charges (which assume our events landed before the close) cannot hold. Re-run.\n{output}"
+        )
     return f"{hour.isoformat()} is already closed: someone else (the rollup worker) closed it. Re-run to pick the next open hours."
 
 
 def closed_among(hours: list[datetime]) -> list[datetime]:
     listed = ", ".join(f"'{h.isoformat()}'" for h in hours)
-    found = psql(f"SELECT to_char(hour_start AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') FROM closed_hours WHERE hour_start IN ({listed})")
+    found = psql(
+        f"SELECT to_char(hour_start AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') FROM closed_hours WHERE hour_start IN ({listed})"
+    )
     return [datetime.fromisoformat(t).replace(tzinfo=timezone.utc) for t in found.split()]
 
 
 # ---- the scenario ----
+
 
 def paint(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m" if sys.stdout.isatty() and not os.environ.get("NO_COLOR") else text
@@ -179,33 +211,46 @@ def play(args) -> int:
         prices[label] = []
         for number, (offset, price_in, price_out) in enumerate(versions, 1):
             effective = datetime(2020, 1, 1, tzinfo=timezone.utc) if offset is None else first + offset
-            psql(f"INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k) "
-                 f"VALUES ('{label}', {number}, '{effective.isoformat()}', {price_in}, {price_out})")
-            prices[label].append({"version": number, "effective_from": effective, "input": price_in, "output": price_out})
+            psql(
+                f"INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k) "
+                f"VALUES ('{label}', {number}, '{effective.isoformat()}', {price_in}, {price_out})"
+            )
+            prices[label].append(
+                {"version": number, "effective_from": effective, "input": price_in, "output": price_out}
+            )
     step("prices inserted (chat-small changes price 30 minutes into the first hour)")
 
     now = int(time.time())
     for role, tenant in tenants.items():
-        sub = {"id": f"sub_{n}_{role}", "object": "subscription", "customer": f"cus_{n}_{role}", "status": "active",
-               "metadata": {"tenant_id": tenant}, "items": {"data": [{"price": {"id": "price_demo"}}]}}
+        sub = {
+            "id": f"sub_{n}_{role}",
+            "object": "subscription",
+            "customer": f"cus_{n}_{role}",
+            "status": "active",
+            "metadata": {"tenant_id": tenant},
+            "items": {"data": [{"price": {"id": "price_demo"}}]},
+        }
         webhook(api, f"evt_{n}_{role}_1", "customer.subscription.updated", sub, now - 20)
         if role == "canceled":
             webhook(api, f"evt_{n}_{role}_2", "customer.subscription.deleted", {**sub, "status": "canceled"}, now - 10)
     webhook(api, f"evt_{n}_past-due_2", "invoice.payment_failed", {"customer": f"cus_{n}_past-due"}, now - 5)
     step("webhooks: one active, one past_due (invoice.payment_failed, in grace), one canceled")
 
-    usage = {role: {} for role in PLAN}   # role -> {(label, hour): [tokens_in, tokens_out]}, summed from response bodies
+    usage = {role: {} for role in PLAN}  # role -> {(label, hour): [tokens_in, tokens_out]}, summed from response bodies
     calls = {role: 0 for role in PLAN}
     first_event = None
 
     def call(role: str, kind: str, when: datetime, want: int = 201, late: bool = False) -> dict:
         model_id = KINDS[kind][0]
         if kind == "embed":
-            status, response = seekrflow._post_json(f"{base}/inference/embeddings", {"model": model_id, "input": "demo text"},
-                                                    {"Authorization": key})
+            status, response = seekrflow._post_json(
+                f"{base}/inference/embeddings", {"model": model_id, "input": "demo text"}, {"Authorization": key}
+            )
             expect(f"embeddings call for {role}", status, 200)
         else:
-            response = seekrflow.fetch_chat(base, key, {"model": model_id, "messages": [{"role": "user", "content": "demo"}]})
+            response = seekrflow.fetch_chat(
+                base, key, {"model": model_id, "messages": [{"role": "user", "content": "demo"}]}
+            )
         event = seekrflow.usage_event(response, tenants[role], model_id)
         # The label carries this run's prices; the time puts the call in a past open hour. The token counts stay as received.
         event["model"], event["occurred_at"] = f"{kind}-{n}", when.isoformat()
@@ -246,24 +291,38 @@ def play(args) -> int:
             raise Fail(f"the rollup did not close {hour.isoformat()}:\n{out}")
     step("rollup closed both hours")
 
-    call("active", "chat-small", hours[0] + timedelta(minutes=40), late=True)   # its hour is closed: stored, never billed
+    call(
+        "active", "chat-small", hours[0] + timedelta(minutes=40), late=True
+    )  # its hour is closed: stored, never billed
     step("late event (its hour is closed) -> 201 late=true, left out of the expected charge")
 
     table, failed = [], False
     start, end = hours[0].strftime("%Y-%m-%dT%H:%M:%SZ"), (hours[1] + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for role in PLAN:
         tenant = tenants[role]
-        status, charges = http("GET", f"{api}/v1/tenants/{tenant}/charges?start={start}&end={end}", {"X-Tenant-Id": tenant})
+        status, charges = http(
+            "GET", f"{api}/v1/tenants/{tenant}/charges?start={start}&end={end}", {"X-Tenant-Id": tenant}
+        )
         expect(f"charges of {tenant}", status, 200)
-        got = {(line["model"], datetime.fromisoformat(line["hour_start"])):
-               {"tokens_in": line["tokens_in"], "tokens_out": line["tokens_out"], "version": line["price_version"], "micros": line["micros"]}
-               for line in charges["lines"]}
+        got = {
+            (line["model"], datetime.fromisoformat(line["hour_start"])): {
+                "tokens_in": line["tokens_in"],
+                "tokens_out": line["tokens_out"],
+                "version": line["price_version"],
+                "micros": line["micros"],
+            }
+            for line in charges["lines"]
+        }
         want = expected_lines({k: tuple(v) for k, v in usage[role].items()}, prices)
         total = expected_total(want)
         # The client rule (docs/billing.md, Paging): the lines held must be the whole range and add up to the total.
-        ok = (got == want and charges["total_micros"] == total and charges["next_cursor"] is None
-              and charges["line_count"] == len(charges["lines"]) == len(want)
-              and sum(line["micros"] for line in charges["lines"]) == charges["total_micros"])
+        ok = (
+            got == want
+            and charges["total_micros"] == total
+            and charges["next_cursor"] is None
+            and charges["line_count"] == len(charges["lines"]) == len(want)
+            and sum(line["micros"] for line in charges["lines"]) == charges["total_micros"]
+        )
         if not ok:
             failed = True
             print(f"MISMATCH {tenant}: API total {charges['total_micros']} vs expected {total}", file=sys.stderr)
@@ -271,10 +330,30 @@ def play(args) -> int:
                 if got.get(k) != want.get(k):
                     print(f"  {k[0]} {k[1].isoformat()}: API {got.get(k)} vs expected {want.get(k)}", file=sys.stderr)
         status_text = psql(f"SELECT status FROM entitlements WHERE tenant_id = '{tenant}'")
-        table.append((tenant, status_text, str(calls[role]), str(sum(v[0] for v in usage[role].values())),
-                      str(sum(v[1] for v in usage[role].values())), str(charges["total_micros"]), str(total), ok))
-    table.append((tenants["canceled"], psql(f"SELECT status FROM entitlements WHERE tenant_id = '{tenants['canceled']}'"),
-                  "0", "-", "-", "refused 402", "-", True))
+        table.append(
+            (
+                tenant,
+                status_text,
+                str(calls[role]),
+                str(sum(v[0] for v in usage[role].values())),
+                str(sum(v[1] for v in usage[role].values())),
+                str(charges["total_micros"]),
+                str(total),
+                ok,
+            )
+        )
+    table.append(
+        (
+            tenants["canceled"],
+            psql(f"SELECT status FROM entitlements WHERE tenant_id = '{tenants['canceled']}'"),
+            "0",
+            "-",
+            "-",
+            "refused 402",
+            "-",
+            True,
+        )
+    )
 
     head = ("tenant", "status", "calls", "tokens in", "tokens out", "charge", "expected", "")
     widths = [max(len(str(r[i])) for r in [head] + table) for i in range(7)]
@@ -284,8 +363,11 @@ def play(args) -> int:
         print("  ".join(str(c).ljust(w) for c, w in zip(row, widths)) + "  " + verdict)
     print("charge = micro-USD from the API; expected = the script's own arithmetic on the token counts it received\n")
 
-    rec = subprocess.run(["docker", "compose", "exec", "-T", "api", "python", "-m", "app.reconcile", "--since", hours[0].isoformat()],
-                         capture_output=True, text=True)
+    rec = subprocess.run(
+        ["docker", "compose", "exec", "-T", "api", "python", "-m", "app.reconcile", "--since", hours[0].isoformat()],
+        capture_output=True,
+        text=True,
+    )
     print(rec.stdout.strip().splitlines()[-1] if rec.stdout.strip() else "reconcile printed nothing")
     if rec.returncode != 0:
         failed = True
@@ -299,7 +381,9 @@ def play(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="billing scenario with an independent check of the charges")
     parser.add_argument("--stand-in-port", type=int, default=8089)
-    parser.add_argument("--live", action="store_true", help="call the real service instead of the stand-in (needs SEEKR_API_KEY)")
+    parser.add_argument(
+        "--live", action="store_true", help="call the real service instead of the stand-in (needs SEEKR_API_KEY)"
+    )
     try:
         return play(parser.parse_args(argv))
     except Fail as err:
