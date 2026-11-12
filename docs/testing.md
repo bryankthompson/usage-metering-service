@@ -74,7 +74,8 @@ These were attacked and held; the test stays because the failure would be silent
 - **Mutation checks.** The two devs report one-line mutations (remove the hour lock, move the commit before the aggregate,
   flip a boundary comparison) that turned the guarding tests red. Those runs are in the handoffs, not in the repo; to
   repeat one, make the edit, run the test, expect red, revert.
-- Nothing here was checked by a person reading the diff; the evidence is the runs above.
+- Apart from the five functions the operator read (`docs/how-it-was-built.md` section 8), nothing here was checked by a person reading the
+  diff; the evidence is the runs above.
 
 ## 5. What the suite does not cover
 
