@@ -6,6 +6,7 @@ difference from it means the rollup would close a different set of hours, which 
 import json
 from datetime import datetime, timedelta, timezone
 
+import psycopg
 import pytest
 
 from app import db, pricing, rollup
@@ -161,6 +162,56 @@ def test_close_due_hours_closes_the_same_hours_for_any_now_and_grace(conn):
         conn.execute("DELETE FROM closed_hours WHERE hour_start <> %s", (utc(2026, 11, 10, 8),))
         conn.execute("DELETE FROM usage_rollups_hourly")
         conn.commit()
+
+
+def due_text(conn, sql, cutoff):
+    """The hours as text, so an infinity row can be compared (psycopg refuses to load one as a datetime)."""
+    rows = conn.execute(f"SELECT hour_start::text AS t FROM ({sql}) q ORDER BY hour_start", {"cutoff": cutoff}).fetchall()
+    conn.commit()
+    return [r["t"] for r in rows]
+
+
+def add_raw_event(conn, key, occurred_at_sql):
+    """Straight SQL, as an operator could do it: the API refuses these, the schema does not."""
+    conn.execute("INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
+                 f" VALUES ('t1', %s, 'mA', 1, 1, '{occurred_at_sql}')", (key,))
+    conn.commit()
+
+
+def with_short_timeout(conn):
+    """A query that never ends fails this test (QueryCanceled) instead of hanging the suite."""
+    conn.execute("SET statement_timeout = '5s'")
+    conn.commit()
+
+
+def test_a_plus_infinity_event_is_ignored_and_the_query_ends(conn):
+    with_short_timeout(conn)
+    add_event(conn, "n1", "2026-11-10T08:30:00Z")
+    add_event(conn, "n2", "2026-11-10T10:30:00Z")
+    add_raw_event(conn, "inf", "infinity")
+    cutoff = utc(2030, 1, 1)
+    assert due_text(conn, rollup.DUE_HOURS, cutoff) == ["2026-11-10 08:00:00+00", "2026-11-10 10:00:00+00"]
+    assert due_text(conn, rollup.DUE_HOURS, cutoff) == due_text(conn, OLD_DUE_HOURS, cutoff)   # as before: never due
+
+
+def test_a_minus_infinity_event_is_still_returned_so_the_close_fails_loudly_as_before(conn):
+    with_short_timeout(conn)
+    add_event(conn, "n1", "2026-11-10T08:30:00Z")
+    add_raw_event(conn, "ninf", "-infinity")
+    cutoff = utc(2030, 1, 1)
+    assert due_text(conn, rollup.DUE_HOURS, cutoff) == ["-infinity", "2026-11-10 08:00:00+00"]
+    assert due_text(conn, rollup.DUE_HOURS, cutoff) == due_text(conn, OLD_DUE_HOURS, cutoff)
+    with pytest.raises(psycopg.DataError):   # psycopg cannot load '-infinity' as a datetime: the run stops with an error
+        rollup.close_due_hours(conn, cutoff)
+    conn.rollback()
+
+
+def test_both_infinities_next_to_normal_events_end_too(conn):
+    with_short_timeout(conn)
+    add_event(conn, "n1", "2026-11-10T08:30:00Z")
+    add_raw_event(conn, "ninf", "-infinity")
+    add_raw_event(conn, "inf", "infinity")
+    assert due_text(conn, rollup.DUE_HOURS, utc(2030, 1, 1)) == ["-infinity", "2026-11-10 08:00:00+00"]
 
 
 # --- the plan: DUE_HOURS must cost per hour, not per event -------------------------------------------------------------

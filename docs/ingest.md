@@ -99,6 +99,9 @@ holds the shared hour lock would block that hour's close for as long as it stays
   (closed ones included, because an unclosed hour can be anywhere in the past), not with the number of events. A test compares it with the old query over
   hour boundaries, the cutoff +/- 1 microsecond, non-UTC offsets, closed and out-of-order hours, late events, two tenants, year 1 and
   year 9999, and another asserts the plan reads at most about one event per hour (`tests/test_due_hours.py`).
+  A row with `occurred_at` `infinity` or `-infinity` (the schema allows it, the API refuses it) cannot make the walk loop: every step must move forward.
+  `infinity` is ignored, as before; `-infinity` is still returned as a due hour, as before, and `close_due_hours` then stops with a psycopg `DataError`
+  (the driver cannot load it as a datetime), a loud failure, not a hang.
 - **Unclosed hours on a charges call (`UNCLOSED_HOURS`, `app/pricing.py`).** The index `usage_events_tenant_occurred_at` on `(tenant_id, occurred_at)`
   serves its `tenant_id = X AND occurred_at in range` filter. Same data, 20 tenants, warm cache: a 30-day range took 33 ms before (an
   `(occurred_at)` index scan that filtered 298,000 rows) and 13 ms after (a bitmap scan of that tenant's rows). A 1-day range took 1.3 ms
