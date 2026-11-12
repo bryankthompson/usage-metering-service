@@ -54,7 +54,7 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   compared only in SQL, with the column collation), so `Zebra` follows `apple`.
 - **All or nothing, on every page.** Each request rates every row of the range, so a missing price anywhere is a 409 on page 1,
   before any line is returned.
-- **The client rule.** Every page of one bill reports the same `total_micros`: never add the totals of the pages (that bills the
+- **The client rule.** Every page reports the whole range's `total_micros` as of its own request (it can differ between requests if hours close meanwhile): never add the totals of the pages (that bills the
   page count times). Add the `micros` of ALL the lines you hold: it must equal the last page's `total_micros`, and the number of lines
   must equal its `line_count`; if not, start over from page 1. The service enforces part of this itself: the cursor holds the count
   and cost of the lines up to it, and a page asked with a cursor whose prefix no longer matches (an hour closed out of order behind
