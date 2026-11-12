@@ -7,7 +7,7 @@ and tied to the line in the existing code where it would attach. The "estimate" 
 
 The rule: write the fact down first, derive everything else from it, and when unsure, deny.
 
-- **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:20-29`, function `usage_events_append_only`).
+- **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:23-32`, function `usage_events_append_only`).
 - **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py:30-37`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
 - **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
