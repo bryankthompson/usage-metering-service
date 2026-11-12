@@ -158,7 +158,7 @@ Assumption: one subscription per tenant. A `customer.subscription.deleted` for a
 subscriptions, ending either denies the tenant (fail closed) until a newer subscription event for the other arrives.
 
 The edge (`require_entitlement`) reads tenant from the `X-Tenant-Id` header, a stand-in for real authentication.
-It opens its own database connection (one extra per request), so a database that is down answers 503 instead of 500.
+It takes its own short checkout from the connection pool (one extra per request, given back before the handler takes its own), so a database that is down, or a pool with no free connection, answers 503 instead of 500.
 
 | Case | Answer |
 |---|---|
