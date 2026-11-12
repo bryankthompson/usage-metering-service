@@ -98,9 +98,11 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   and the image carries them, so apply them to the running stack
   without losing data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`.
   After an interrupted first start the way back is `docker compose down -v`, then `docker compose up -d --build --wait`
-  again: a first start holds no data to keep. `up --wait` can return 0 on the half-built stack, because no healthcheck
-  opens the `metering` database (the db's is `pg_isready`, the api's `/healthz` checks the process only, the rollup has
-  none); the signs are `scripts/demo.sh` failing in its first steps and the rollup container restarting in a loop.
+  again: a first start holds no data to keep. The db healthcheck opens the `metering` database, so a kill during `initdb` (no
+  database yet) makes `up --wait` exit 1 with `dependency failed to start: container ...-db-1 is unhealthy`. A kill after the
+  schema scripts started leaves the database with a partly built schema: `up --wait` can return 0 (the rollup has no healthcheck
+  and the api's `/healthz` checks the process only), and the signs are `scripts/demo.sh` failing in its first steps and the
+  rollup container restarting in a loop.
   The data lives in the named volume `pgdata`, so `docker compose down` and a recreated container keep it, and only
   `docker compose down -v` resets it (it deletes it). A stack started before the volume was named keeps its old data in an
   anonymous volume: dump it with `pg_dump --data-only` before switching ([docs/demo.md](docs/demo.md)).
