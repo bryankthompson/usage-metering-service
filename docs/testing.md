@@ -102,7 +102,7 @@ These were attacked and held; the test stays because the failure would be silent
 - Data kept across `docker compose down` and `up` (the named volume `pgdata`): checked by hand, not in `scripts/test`. After
   `down` without `-v` and after `up -d --force-recreate db`, a seeded price, entitlement and events were still there; `down -v`
   gave an empty database with the tables recreated from `db/*.sql`.
-- Multi-process concurrency: the race tests use threads in one process. Two rollup processes at once were not run.
+- Multi-process concurrency: the race tests use threads in one process. Two rollup processes at once were run by hand on main 1dd2039: two `--every 1` loops and a one-shot, started together while the oldest hour's advisory lock was held, three rounds. They closed 51 hours for 51 distinct hours with 96 rollup rows for 96 keys, `reconcile` printed drift 0 and the rollup logs held no errors; in every round one process took every hour (in the first round the other two printed `nothing due`).
 - Stripe: signatures are made locally with a fake secret; no call to Stripe, no real platform call, test mode only.
 - Load beyond the flood's 600 requests. (The 64 KiB body cap on `/v1/usage` and the webhook's 1 MiB cap are tested:
   `tests/test_usage_body_cap.py`.)
