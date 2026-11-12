@@ -36,11 +36,11 @@ built: any run at data volumes where the columnar store matters, a schedule for 
 (`compose.yaml:22-39`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:41-51`).
 `db` and `api` have a health check; `rollup` has none. The `api` one (`compose.yaml:34-38`) fetches `GET /healthz` from inside the
 container every 2 s (up to 30 retries), so `docker compose up --wait` returns when the API answers, not when its process starts;
-`/healthz` does not touch the database (`app/main.py:59-65`). The API answers 503 on
+`/healthz` does not touch the database (`healthz` in `app/main.py`). The API answers 503 on
 every route that uses the database when it is unreachable; `/healthz` does not touch it and keeps answering 200
-(`app/main.py:39-47,59-65`). It also answers 413 to a webhook body over 1 MiB
-(`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
-`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:17-30`). A cluster would add liveness and readiness probes
+(`database_unavailable` and `healthz` in `app/main.py`). It also answers 413 to a webhook body over 1 MiB
+(`MAX_BODY_BYTES` and `raw_body` in `app/webhooks.py`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
+`LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py`). A cluster would add liveness and readiness probes
 on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and
 secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in the file. No manifests are written and none are tested.
 
@@ -63,9 +63,9 @@ provider today (`README.md`, "Not built").
 | Late events flagged and never billed, instead of reopening a closed hour | A closed hour's usage never changes, so the same price versions give the same bill. A price version back-dated into a closed hour changes a recomputed charge (`docs/billing.md`). | Usage for a closed hour is lost to billing until a late-adjustment rule exists. |
 | Grace counted from the first failure that arrives | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). It is Stripe's first failure only when delivery order equals creation order. |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
-| Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py:22-23,137-139`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
+| Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
 | Prices as append-only versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable` in `db/002_billing.sql`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
-| The edge reads the entitlement on its own connection checkout | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement` in `app/edge.py`); a handler in `app/main.py:39-47` now also answers 503 for a database that dies after the edge check. | One extra short checkout from the bounded connection pool per request (`DB_POOL_MAX`, `docs/ingest.md`). |
+| The edge reads the entitlement on its own connection checkout | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement` in `app/edge.py`); the `database_unavailable` handler in `app/main.py` now also answers 503 for a database that dies after the edge check. | One extra short checkout from the bounded connection pool per request (`DB_POOL_MAX`, `docs/ingest.md`). |
 | Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
 
 ## 4. A day against a week
