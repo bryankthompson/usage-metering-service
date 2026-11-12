@@ -10,6 +10,7 @@ import time
 import tracemalloc
 from datetime import datetime, timedelta, timezone
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -381,9 +382,9 @@ def test_the_unclosed_hours_list_says_when_it_was_cut(client, conn, hours, trunc
 
 # --- the deadline ---------------------------------------------------------------------------------------------------------
 
-def backends(conn):
+def in_transaction(conn):
     return conn.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
-                        ).fetchone()["n"]
+                        " AND state LIKE 'idle in transaction%'").fetchone()["n"]
 
 
 @pytest.mark.parametrize("params", [{"limit": 5}, {}], ids=["paged", "unpaged"])
@@ -403,11 +404,9 @@ def test_a_pass_past_the_request_deadline_is_504_and_releases_its_connection(cli
     resp = client.get(PATH, params={**span(20), **params})
     assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
     assert time.monotonic() - started < 3                           # 20 rows x 50 ms would be 1 s: it stopped at 0.3 s
-    for _ in range(50):                                             # the backend goes away with the closed connection
-        if backends(conn) == 0:
-            break
-        time.sleep(0.05)
-    assert backends(conn) == 0
+    stats = db._request_pool().get_stats()                          # the connection went back to the pool (which keeps it open)
+    assert stats["pool_size"] - stats["pool_available"] == 0
+    assert in_transaction(conn) == 0                                # and went back with its transaction rolled back
 
 
 # --- memory ---------------------------------------------------------------------------------------------------------------
@@ -464,3 +463,42 @@ def test_forty_largest_pages_at_once_fit_in_a_stated_budget(client, conn, capsys
 
 
 MAX_PAGE_BUDGET = 512 * 2**20
+
+
+# --- the pool hands out an idle connection: SET TRANSACTION must be the first statement ----------------------------------------
+
+SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+
+
+def test_a_fresh_pooled_connection_accepts_the_snapshot_statement_first(conn, monkeypatch):
+    db.close_pool()
+    with db.request_connection() as c:                              # just made by the pool, configured, never used
+        assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+        c.execute(SNAPSHOT)
+        assert c.execute("SHOW transaction_isolation").fetchone()["transaction_isolation"] == "repeatable read"
+
+
+def test_a_reused_pooled_connection_accepts_it_too_after_work_and_after_a_failure(conn, monkeypatch, client):
+    monkeypatch.setenv("DB_POOL_MAX", "1")                          # one connection: every borrow is the one just returned
+    add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
+    rollup(conn, "m1", T0)
+    pids = set()
+    with db.request_connection() as c:                              # a borrower that used the connection, then took the lock path
+        pids.add(c.info.backend_pid)
+        c.execute(SNAPSHOT)
+        c.execute("SELECT 1")
+    with pytest.raises(RuntimeError):
+        with db.request_connection() as c:                          # a borrower that failed midway, inside a transaction
+            pids.add(c.info.backend_pid)
+            c.execute("SELECT 1")
+            raise RuntimeError("boom")
+    with db.request_connection() as c:                              # direct: SET TRANSACTION first, on the returned connection
+        pids.add(c.info.backend_pid)
+        assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+        c.execute(SNAPSHOT)
+    for params in ({"limit": 5}, {}):                               # and whole requests (edge checkout, then the handler's)
+        resp = client.get(PATH, params={**span(1), **params})
+        assert resp.status_code == 200 and len(resp.json()["lines"]) == 1
+    with db.request_connection() as c:
+        pids.add(c.info.backend_pid)
+    assert len(pids) == 1                                           # it really was one connection throughout

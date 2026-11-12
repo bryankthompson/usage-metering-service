@@ -59,6 +59,9 @@ exact head and a green CI (`docs/build-story.md`, "Gates"); the repo records no 
 These were attacked and held; the test stays because the failure would be silent. All run in `scripts/test`.
 - Duplicate and conflicting intake: 20 identical requests store one event; 20 with two payloads for one key store one and
   agree on the winner (`tests/test_attack_ingest.py`).
+- The request-path pool (`tests/test_pool.py`): 200 concurrent requests stay under the cap, every borrow is a clean session, a second
+  checkout on a thread that holds one raises, a stopped and restarted database is 503 and then 201 without a restart, and a pool
+  with no free connection is 503 with the stats logged.
 - Ingest racing the hour close, 12 rounds with threads on separate connections: each event is in the closed rollup or
   flagged late, never both, never neither. Rollups run four at once close each hour once.
 - A close whose connection is terminated before commit leaves the hour open; a rerun closes it with the same numbers.

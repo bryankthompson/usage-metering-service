@@ -1,7 +1,7 @@
 # Usage intake: `POST /v1/usage`
 
 Stores one usage event in the `usage_events` table (`db/001_usage.sql`) behind the edge check `require_entitlement`, which
-reads the entitlement on its own connection (the handler uses a second one). A trigger refuses UPDATE and DELETE on the table;
+reads the entitlement on its own short checkout from the connection pool (the handler takes a second, short one; nothing is held in between). A trigger refuses UPDATE and DELETE on the table;
 the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). In compose the
 application connects as that superuser, so the trigger guards against mistakes, not against the service's own credentials.
 
@@ -187,6 +187,32 @@ holds the shared hour lock would block that hour's close for as long as it stays
 so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on every route after the entitlement edge (the edge answers 503 for its own read; `POST /v1/usage` re-raises it to the handler in `app/main.py`). A lock wait over 2 s and a failed connection stay 503. `/healthz` is an `async` route that touches
 nothing, so it keeps answering while every worker thread is busy; it shows that the process is up and its event loop
 answers, not that the database does.
+**Connection pool (`app/db.py`, `request_connection`).** The request path borrows connections from a bounded pool, one per
+uvicorn worker process, opened on first use. `DB_POOL_MAX` (default 40, the size of the anyio thread pool that runs the
+handlers) caps the connections one worker holds; `DB_POOL_TIMEOUT` (default the 5 s connect timeout) is how long a request
+waits for a free one. A wait that runs out is a `PoolTimeout`, an `OperationalError`, so it is the same 503 as a refused
+connection (edge: `entitlement check unavailable`; handler: `database unavailable`, `retry-after: 1`), and the log line
+`no pooled connection came free: {pool stats}` names it. Each worker has its own pool: workers x `DB_POOL_MAX` must stay
+under the Postgres `max_connections` (100 by default), or lower `DB_POOL_MAX`. A bad value for either variable raises
+`ValueError` naming it. Every borrow is a clean session (autocommit off, 15 s statement timeout, UTC, no prepared-statement
+cache: `prepare_threshold=None`), and a borrowed connection is checked with `check_connection` before use, so a backend that
+was killed or restarted is replaced, not handed out. That check has no timeout of its own: it does **not** close the frozen
+database gap below. The earlier fence (a dependency that held a connection while it waited for a worker thread used up the
+Postgres slots) is kept by two short checkouts and never one held across the edge/handler boundary; with a bounded pool, a
+held one would deadlock, so a thread that asks for a second checkout while holding one gets a `RuntimeError` at once.
+**How long a checkout lives.** An ingest checkout lasts one transaction (milliseconds). A charges checkout lasts the whole streamed
+pass (one repeatable-read transaction, `docs/billing.md`): about 2 s for a year of 114 models (1,002,096 rows, measured without the pool on
+one machine), up to the 15 s deadline for a bigger range. So a few big charges requests hold slots for seconds while ingest needs
+milliseconds. Estimate, not measured under the pool: with `DB_POOL_MAX=40` and 2 s passes, about 20 such passes a second fill the
+pool (40 / 2 s), and a request that waits more than `DB_POOL_TIMEOUT` (5 s) for a slot is a 503; size `DB_POOL_MAX` for the number of
+long charges requests you expect at once plus the ingest load, within the workers x `DB_POOL_MAX` limit above.
+The rollup, reconcile, the delinquent job and the mirror CLI keep `db.connect()` (own connection, no statement timeout where
+they had none). Tests: `tests/test_pool.py`.
+A flood of 300 + 300 requests (`scripts/flood.py`, 150 clients, a hand-run check and not a load test; the peak is sampled, so it is
+approximate): before the pool the wall time was 4.51 s and 4.32 s with a sampled peak of 35 and 34 backends; with the pool at 40
+it was 3.03 s and 2.79 s with a peak of 36 and 40; with `DB_POOL_MAX=10` the peak was 10. Every run gave 300 x 201 and 300 x 200.
+Two runs each on one machine do not show a gain in throughput; what they show is that the cap holds. `scripts/outage-check.sh`
+passed against the pooled stack (503 while the db was stopped, 201 after, no API restart).
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the
 statement timeout is enforced by the server and the client has no timer of its own; the settings query right after
 connecting is likewise not bounded (found by review, not fixed).

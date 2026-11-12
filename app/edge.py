@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import psycopg
 from fastapi import HTTPException, Request
 
-from app.db import connect
+from app.db import request_connection
 
 log = logging.getLogger(__name__)
 
@@ -36,8 +36,8 @@ def _deny(status_code: int, tenant_id: str | None, reason: str) -> HTTPException
 def require_entitlement(request: Request) -> str:
     """Return the entitled tenant id, or raise HTTPException (401 no tenant, 402 not entitled, 503 cannot tell).
 
-    The entitlement is read on its own connection, so a database that is down fails here as 503 and
-    never lets the request through.
+    The entitlement is read on its own short checkout from the pool, given back before this returns (the handler takes its own),
+    so a database that is down, or a pool with no free connection, fails here as 503 and never lets the request through.
     """
     tenant_id = request.headers.get("x-tenant-id") or ""
     try:
@@ -49,7 +49,7 @@ def require_entitlement(request: Request) -> str:
     if not tenant_id:
         raise _deny(401, None, "X-Tenant-Id header is required")
     try:
-        with connect() as conn:
+        with request_connection() as conn:
             row = conn.execute(
                 "SELECT status, grace_until FROM entitlements WHERE tenant_id = %s", (tenant_id,)).fetchone()
     except psycopg.Error as err:

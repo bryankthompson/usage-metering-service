@@ -306,7 +306,7 @@ def test_the_database_unreachable_after_the_edge_is_503(client, monkeypatch):
     def refuse(*args, **kwargs):
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(db, "connect", refuse)
+    monkeypatch.setattr(db, "request_connection", refuse)
     r = client.post("/v1/usage", json=event())
     assert (r.status_code, r.json()) == (503, {"detail": "database unavailable"})
 

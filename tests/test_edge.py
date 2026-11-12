@@ -91,8 +91,9 @@ def test_unknown_status_is_402(client, monkeypatch):
         def fetchone(self):
             return {"status": "something_new", "grace_until": None}
 
-    monkeypatch.setattr(edge, "connect", Stub)
-    assert client.get("/probe", headers=HEADERS).status_code == 402
+    monkeypatch.setattr(edge, "request_connection", Stub)
+    resp = client.get("/probe", headers=HEADERS)
+    assert (resp.status_code, resp.json()["detail"]) == (402, "not entitled: status something_new")   # not "no entitlement": the stub was read
 
 
 def test_database_down_is_503_never_allowed(client, conn, monkeypatch):

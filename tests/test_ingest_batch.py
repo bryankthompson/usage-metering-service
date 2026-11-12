@@ -203,7 +203,7 @@ def test_the_tenant_check_comes_before_any_database_work(client, conn, monkeypat
     def fail(*args, **kwargs):
         raise AssertionError("the database was opened before the tenant check")
 
-    monkeypatch.setattr(db, "connect", fail)
+    monkeypatch.setattr(db, "request_connection", fail)
     assert client.post(BATCH, json=batch(event(tenant_id="t2"))).status_code == 403
 
 
@@ -404,7 +404,7 @@ def test_the_database_unreachable_is_503(client, monkeypatch):
     def refuse(*args, **kwargs):
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(db, "connect", refuse)
+    monkeypatch.setattr(db, "request_connection", refuse)
     r = client.post(BATCH, json=batch(event()))
     assert (r.status_code, r.json(), r.headers.get("retry-after")) == (503, {"detail": "database unavailable"}, "1")
 
@@ -597,7 +597,7 @@ def test_each_route_answers_a_changed_payload_with_409_and_an_unchanged_one_with
 
 
 def test_a_batch_that_repeats_a_key_with_a_different_payload_never_reaches_the_database(client, conn, monkeypatch):
-    monkeypatch.setattr(db, "connect", lambda *a, **k: pytest.fail("the database was opened"))
+    monkeypatch.setattr(db, "request_connection", lambda *a, **k: pytest.fail("the database was opened"))
     r = client.post(BATCH, json=batch(event(), event(idempotency_key="b"), event(tokens_in=99)))
     assert r.status_code == 409 and "events[0] and events[2]" in r.json()["detail"]
 

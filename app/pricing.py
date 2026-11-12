@@ -355,9 +355,9 @@ def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime, limit: int
             after = decode_cursor(cursor, tenant_id, start, end)
         except (ValueError, ForeignCursor) as err:
             raise HTTPException(status_code=422, detail=str(err)) from err
-    # Opened here, not in a dependency (as in `ingest_usage`): a dependency's connection stays open while the request waits
+    # Taken here, not in a dependency (as in `ingest_usage`): a dependency's connection stays held while the request waits
     # for a free worker thread, and a refused request above never needs one. A database error reaches the handler in main.py.
-    with db.connect() as conn:
+    with db.request_connection() as conn:
         # One snapshot for the unclosed hours, the rows and the prices: an hour that closes while this runs is in all or none.
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         unclosed, unclosed_cut = unclosed_hours(conn, tenant_id, start, end)

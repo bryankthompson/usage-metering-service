@@ -132,9 +132,9 @@ def ingest_usage(
         log.warning("usage rejected: body tenant %r is not the entitled tenant %r", event.tenant_id, tenant)
         raise HTTPException(status_code=403, detail="tenant_id does not match the entitled tenant")
     try:
-        # Opened here, not in a dependency: a dependency's connection stays open while the request waits for a
-        # free worker thread, so a burst of requests used up Postgres's connection slots.
-        with db.connect() as conn:
+        # Taken here, not in a dependency: a dependency's connection stays held while the request waits for a free
+        # worker thread, which used up Postgres's connection slots, and with a bounded pool it would deadlock.
+        with db.request_connection() as conn:
             return _store(event, response, tenant, conn)
     except psycopg.errors.QueryCanceled:  # a statement past the timeout: the handler in app/main.py answers 504
         raise
@@ -251,7 +251,7 @@ def ingest_usage_batch(
                         tenant, j, i, event.idempotency_key)
             raise HTTPException(status_code=409, detail=f"events[{j}] and events[{i}] use the same idempotency_key with different payloads")
     try:
-        with db.connect() as conn:      # leaving the block on an exception rolls the whole batch back
+        with db.request_connection() as conn:      # leaving the block on an exception rolls the whole batch back
             results = _store_batch(events, first, tenant, conn)
     except psycopg.errors.QueryCanceled:
         raise

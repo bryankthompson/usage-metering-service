@@ -12,7 +12,7 @@ import psycopg
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from app.db import connect, limit_lock_wait
+from app.db import limit_lock_wait, request_connection
 
 log = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ def handle_event(conn: psycopg.Connection, event: dict) -> str:
 def stripe_webhook(payload: bytes = Depends(raw_body),
                    stripe_signature: str | None = Header(default=None)) -> dict[str, str]:
     event = verify(payload, stripe_signature)
-    with connect() as conn:                       # opened only after the signature checks out; closed on exit
+    with request_connection() as conn:           # taken only after the signature checks out; returned on exit
         outcome = handle_event(conn, event)
         if outcome in ("processed", "stale"):     # stale is recorded as handled: its redelivery is a duplicate
             conn.commit()

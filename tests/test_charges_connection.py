@@ -1,8 +1,8 @@
 """GET /v1/tenants/{id}/charges takes its database connection inside the handler, as POST /v1/usage does.
 
-A dependency's connection stays open while the request waits for a free worker thread (the note in `ingest_usage`), so a
-burst of charges requests used up the database's connection slots. And a refused request (wrong tenant, a 422) has no
-reason to open a connection at all."""
+A dependency's connection stays held while the request waits for a free worker thread (the note in `ingest_usage`), so a
+burst of charges requests used up the database's connection slots; with the pool that would also be a deadlock. And a
+refused request (wrong tenant, a 422) has no reason to take a connection at all."""
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,15 +29,15 @@ def client():
 
 @pytest.fixture
 def connects(monkeypatch):
-    """Every `db.connect()` call made while the test runs (the edge is overridden, so these are the handler's)."""
+    """Every `db.request_connection()` call made while the test runs (the edge is overridden, so these are the handler's)."""
     calls = []
-    real = db.connect
+    real = db.request_connection
 
     def counting(*args, **kwargs):
         calls.append(1)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(db, "connect", counting)
+    monkeypatch.setattr(db, "request_connection", counting)
     return calls
 
 
@@ -75,12 +75,18 @@ def test_a_database_that_cannot_be_reached_is_503_with_retry_after_1(client, mon
     def refuse(*args, **kwargs):
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(db, "connect", refuse)
+    monkeypatch.setattr(db, "request_connection", refuse)
     resp = client.get("/v1/tenants/tenant-1/charges", params=GOOD)
     assert (resp.status_code, resp.json(), resp.headers["retry-after"]) == (503, {"detail": "database unavailable"}, "1")
 
 
-def open_connections(conn) -> int:
+def checked_out() -> int:
+    """Pooled connections a request holds right now (the idle ones waiting in the pool are not counted)."""
+    stats = db._request_pool().get_stats()
+    return stats["pool_size"] - stats["pool_available"]
+
+
+def backends(conn) -> int:
     """Sessions on this database other than the test's own. The commit first: pg_stat_activity is a snapshot that is kept
     until the transaction ends, so without it every poll would repeat the first answer."""
     conn.commit()
@@ -90,7 +96,8 @@ def open_connections(conn) -> int:
 
 def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_that_has_no_thread(conn, monkeypatch):
     """60 requests, more than the ~40 worker threads, all stalled inside the read. Only a request that holds a thread may
-    hold a connection: with the connection taken by a dependency, the requests still waiting for a thread held one too."""
+    hold a connection: with the connection taken by a dependency, the requests still waiting for a thread held one too.
+    The pooled connections checked out equal the stalled requests, and Postgres never sees more backends than the pool's cap."""
     release = threading.Event()
     lock = threading.Lock()
     inside = []
@@ -111,20 +118,21 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
             for _ in range(600):                                     # until the number of stalled requests stops growing
                 time.sleep(0.05)
                 with lock:
-                    now = (len(inside), open_connections(conn))
+                    now = (len(inside), checked_out())
                 steady = steady + 1 if now == seen and now[0] > 0 else 0
                 if steady >= 6:                                      # unchanged for 0.3 s: the pool is full
                     break
                 seen = now
             else:
                 pytest.fail(f"the burst never settled: {seen}")
-            stalled_requests, connections = now
+            stalled_requests, held = now
+            backend_count = backends(conn)
             release.set()
             statuses = {s.result(timeout=30).status_code for s in senders}
     finally:
         release.set()
         app.dependency_overrides.clear()
     assert stalled_requests < 60, "the worker pool was never full, so this test shows nothing"
-    assert connections == stalled_requests, (
-        f"{connections} connections open for {stalled_requests} requests that hold a worker thread")
+    assert held == stalled_requests, f"{held} connections checked out for {stalled_requests} requests that hold a worker thread"
+    assert backend_count <= db.DEFAULT_POOL_MAX
     assert statuses == {200}
