@@ -227,3 +227,22 @@ def test_backfill_work_is_linear_in_rows(monkeypatch):
     result, sent = run_new(monkeypatch, rows, mirrored)
     assert result[0] == len(sent) and result[0] > 0
     assert calls < 5 * len(rows)                                     # old code: ~ hours x rows = 5000 x 100,000
+
+
+def _record_mirror_hours(monkeypatch):
+    seen = []
+    monkeypatch.setattr(mirror, "mirror_hours", lambda to_mirror: seen.append(list(to_mirror)))
+    return seen
+
+
+def test_with_the_mirror_off_no_closed_hour_is_held_for_the_mirror_pass(conn, five_hours, monkeypatch):
+    monkeypatch.delenv("CLICKHOUSE_URL", raising=False)
+    seen = _record_mirror_hours(monkeypatch)
+    assert len(close_due_hours(conn, NOW)) == 5
+    assert seen == [[]]                                              # nothing kept in memory for a pass that does nothing
+
+
+def test_with_the_mirror_on_every_closed_hour_is_held_in_order(conn, url, five_hours, monkeypatch):
+    seen = _record_mirror_hours(monkeypatch)
+    close_due_hours(conn, NOW)
+    assert [h for h, _ in seen[0]] == HOURS
