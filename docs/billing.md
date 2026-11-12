@@ -84,6 +84,10 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   seconds on a comparable machine (a slower or busier host, or concurrent requests, will be slower), so 15 s corresponds to about
   7 million rows. The year of 114 models measured here is a seventh of that; a tenant with about 800 models over a year (8,784 rows each) would reach it.
   One run's figures, not a promise.
+- **Pool slot.** The pass runs inside one checkout from the request pool (`db.request_connection`, `docs/ingest.md`), so a request
+  holds a slot for its whole pass: about 2 s for the year above, up to the 15 s deadline. Forty such requests at once take every slot of
+  a worker with the default `DB_POOL_MAX` of 40, and ingest requests then wait up to `DB_POOL_TIMEOUT` (5 s) and answer 503. An
+  estimate from the figures above, not a measurement under the pool.
 - **Index.** `(tenant_id, hour_start, model)` on `usage_rollups_hourly` was measured and not added. On 1,083,456 rows (114 models x
   366 days for one tenant plus a month of another), `EXPLAIN (ANALYZE, BUFFERS)` of the whole-year read: without the index a
   parallel sequential scan plus an external-merge sort (about 48 MB of temporary files in three workers), 557 ms; with it an index scan

@@ -200,6 +200,12 @@ was killed or restarted is replaced, not handed out. That check has no timeout o
 database gap below. The earlier fence (a dependency that held a connection while it waited for a worker thread used up the
 Postgres slots) is kept by two short checkouts and never one held across the edge/handler boundary; with a bounded pool, a
 held one would deadlock, so a thread that asks for a second checkout while holding one gets a `RuntimeError` at once.
+**How long a checkout lives.** An ingest checkout lasts one transaction (milliseconds). A charges checkout lasts the whole streamed
+pass (one repeatable-read transaction, `docs/billing.md`): about 2 s for a year of 114 models (1,002,096 rows, measured without the pool on
+one machine), up to the 15 s deadline for a bigger range. So a few big charges requests hold slots for seconds while ingest needs
+milliseconds. Estimate, not measured under the pool: with `DB_POOL_MAX=40` and 2 s passes, about 20 such passes a second fill the
+pool (40 / 2 s), and a request that waits more than `DB_POOL_TIMEOUT` (5 s) for a slot is a 503; size `DB_POOL_MAX` for the number of
+long charges requests you expect at once plus the ingest load, within the workers x `DB_POOL_MAX` limit above.
 The rollup, reconcile, the delinquent job and the mirror CLI keep `db.connect()` (own connection, no statement timeout where
 they had none). Tests: `tests/test_pool.py`.
 A flood of 300 + 300 requests (`scripts/flood.py`, 150 clients, a hand-run check and not a load test; the peak is sampled, so it is
