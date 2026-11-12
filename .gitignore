@@ -5,3 +5,4 @@ __pycache__/
 # session log written by the cockpit's status-db plugin
 data/
 .coverage
+outputs/
