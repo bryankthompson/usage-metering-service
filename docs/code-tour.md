@@ -29,10 +29,10 @@ one on purpose, as `_utc_year_in_range` (`app/ingest.py:109`) does for an overfl
 Without `from err`, the caller still gets the same 503. Python chains the two anyway, but the log wording becomes
 "during handling of the above exception, another exception occurred", which reads like a bug in the handler.
 
-## 5. Star-unpack: `(hour, *result)` (`app/rollup.py:113`)
+## 5. Star-unpack: `(hour, *result)` (`close_due_hours` in `app/rollup.py`)
 `*result` splices the items of an iterable into the tuple being built. Here `result` is `(rows written, events counted)`,
 so `(hour, *result)` is `(hour, rows, events)`, one flat tuple of three.
-Without the star, the tuple is `(hour, (rows, events))`. The loop at `app/rollup.py:125`, `for hour, rows, events in closed`,
+Without the star, the tuple is `(hour, (rows, events))`. The loop in `run_once` in `app/rollup.py`, `for hour, rows, events in closed`,
 would then raise `ValueError: not enough values to unpack (expected 3, got 2)`.
 The same idea with two stars merges dicts: `{"a": f, **{name: g for name in names}}` in the `HANDLERS` table (`app/webhooks.py:196`).
 

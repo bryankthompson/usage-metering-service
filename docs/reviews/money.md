@@ -109,3 +109,5 @@ Held: it lists hours with non-late events not in closed_hours inside the same [s
 
 ## Not got to
 Live run of `--fail-on-unbilled` in compose, statement-timeout effect on a long charges query (15 s default), 1M-row EXPLAIN of UNCLOSED_HOURS (it scans the tenant's events in the range through the occurred_at index only).
+> Note, 2026-11-11: a `(tenant_id, occurred_at)` index, `usage_events_tenant_occurred_at` (db/001_usage.sql), now serves UNCLOSED_HOURS.
+
