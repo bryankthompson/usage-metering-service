@@ -1,116 +1,68 @@
 # usage-metering-service
 
-## Start here
-
 Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service stores each event
 once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
-To try it: `docker compose up -d --build`, then `scripts/demo.sh`; `scripts/test` runs the tests. Or `scripts/up`: one command that starts the stack, plays a three-tenant scenario against a stand-in inference server and checks the charges independently ([docs/demo.md](docs/demo.md)).
-Read next: [how it was built and checked](docs/how-it-was-built.md), [the review reports](docs/reviews/README.md),
-and [what is not built](#not-built).
+Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
 
-A small prototype. Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
+To try it, run `scripts/up`: one command that starts the stack, plays a three-tenant scenario against a stand-in inference
+server and checks the charges independently ([docs/demo.md](docs/demo.md)). The other route, `docker compose up -d --build`
+then `scripts/demo.sh`, is under [Run it](#run-it); `scripts/test` runs the tests.
+
+```mermaid
+flowchart LR
+    client["client (X-Tenant-Id header)"] --> edge["edge: require_entitlement"]
+    edge -->|allowed| ingest["POST /v1/usage"]
+    ingest --> events[("usage_events, append-only")]
+    events --> rollup["hourly rollup (app.rollup)"]
+    rollup --> rollups[("usage_rollups_hourly")]
+    rollup --> closed[("closed_hours")]
+    rollup -.->|optional| ch[("ClickHouse mirror")]
+    rollups --> charges["GET /v1/tenants/{tenant_id}/charges"]
+    closed -.->|unclosed hours| charges
+    events -.->|unclosed hours| charges
+    prices[("price versions")] --> charges
+    edge -->|allowed| charges
+    stripe["Stripe test-mode webhook"] --> hook["POST /v1/stripe/webhook (signature check)"]
+    hook --> ent[("entitlements")]
+    ent --> edge
+    adapter["seekrflow adapter: never run against the real service"] -.-> ingest
+```
+
+## How it was built
+
+The operator designed the process that made AI-written code mergeable, and this section is the record of what that process
+caught and missed. Models wrote and reviewed the code, and the operator is not a coder, so this is not the operator vouching
+for the code.
+
+The method: one brief per job that fixed which files it could touch; a review desk (DRC) that reads each change and cannot
+merge; a merge command that refuses without a review receipt for the branch, a head that contains the latest `main` and
+green CI; a mutation check (break the new rule by one line, watch the guarding test fail, revert); four read-only red-team
+lenses (money, concurrency, security, operations), each counting a finding only with a command or a failing test that shows it; and
+agents with no context who read a clean copy of the tree. Round one of the red team found 0 blockers, 9 major and 10 minor,
+and round two 0 blockers reported, 3 major and 7 minor; a fifth lens that checked the README and docs against the code found
+0 major and 9 minor.
+
+What it did not do. Every reviewer was a model, except that the operator read five functions on the money and entitlement path:
+`_store`, `close_hour`, `_in_force` with `_rate`, `require_entitlement` and `_apply_subscription`. The reviewers found real
+defects and missed some. The platform adapter (`seekrflow`) never ran against the real service, and `seekrflow live` never
+ran. There is no load test beyond `scripts/flood.py`. Details: [how it was built and checked](docs/how-it-was-built.md),
+the longer [build story](docs/build-story.md) and the timestamped [build log](docs/build-log.md).
+
+Read next: [how it works, part by part](docs/how-it-works.md), [the review reports](docs/reviews/README.md),
+and [what is not built](#not-built).
 
 ## How it works
 
-**1. A usage event comes in.** `POST /v1/usage` (`app/ingest.py`) takes `tenant_id`, `idempotency_key`,
-`model` (1 to 200 characters each), `tokens_in`, `tokens_out` (integers, 0 to 10^12) and `occurred_at`
-(ISO 8601 text with a time zone).
-One `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` does the dedupe, so two identical
-requests at the same instant store one event. New event: **201** `accepted`. Resend with the same key and
-payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `late`. Same key with a
-different payload: **409**. Body `tenant_id` is not the
-tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**: an oversized
-`Content-Length` is rejected immediately; otherwise streamed chunks are counted and the request is rejected as soon as
-they pass the cap, without buffering the rest (also with no credentials). A body the server cannot parse at all (for
-example JSON nested very deep: measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400 from about
-10,077, so the boundary lies between those two numbers): **400**.
-
-**2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
-every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the
-trigger). In compose the application connects as that superuser, so the trigger guards against mistakes, not against the
-service's own credentials. The application never rewrites an accepted event.
-
-**3. Hourly rollups.** `app/rollup.py` sums one UTC hour of events per tenant and model into
-`usage_rollups_hourly` and records the hour in `closed_hours`, in one transaction. `python -m app.rollup`
-closes every hour that has events and ended at least 5 minutes ago (`--every SECONDS` repeats; compose runs
-it hourly as the `rollup` service). Late and duplicate events never change a closed hour: an event whose
-UTC hour is already closed is stored with `late = true` and answered 201 with `"late": true` (a resend says
-so too), but it is left out of the rollup, so it is never charged. Ingest takes a shared advisory lock on the event's hour and closing
-takes the exclusive one, so every event of a closed hour is either in its closed rollup or flagged late,
-never both and never neither. Each hour is closed on its own: if one fails (for example a sum past BIGINT) it is rolled
-back, logged as `rollup failed: hour=...` and skipped, the hours after it still close, a one-shot run exits 1, and the
-`--every` loop retries it each cycle. Details and the known limits: [docs/ingest.md](docs/ingest.md).
-
-**4. Versioned prices in micro-USD.** `app/pricing.py`. Each model has numbered price versions with an
-`effective_from` and two integer prices, micro-USD per 1,000 input and per 1,000 output tokens (1 USD =
-1,000,000). A new price is a new version; a database trigger rejects changing or deleting a stored one.
-`price_at` picks the version in force at a time, and raises `NoPrice` when there is none: a missing price
-is never rated as zero. A rate is `(tokens_in * input_price + tokens_out * output_price) / 1000` in integer
-arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at the price in
-force at the start of its hour, so a price change applies from the first hour that starts at or after its effective time
-(a version effective at 10:30 applies from the 11:00 hour). Nothing stores a bill. Charges cover closed hours only:
-`unclosed_hours` in the answer lists the hours in the range that hold usage but are not closed yet (the earliest 100), so a
-total with a non-empty list is partial (100 entries means at least 100). Use `start` and `end` on UTC hour boundaries: an
-hour is in or out of a range by its start, so a range that cuts an hour includes or drops all of it. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
-not ISO 8601 text, `start >= end`, or a range wider than 366 days, **409** when a row has no price in force (the message
-names the models without one, with the first hour of each; past 20 it says how many more). Details: [docs/billing.md](docs/billing.md).
-
-**5. Stripe test-mode webhooks set the entitlement.** `POST /v1/stripe/webhook` (`app/webhooks.py`) checks
-the `Stripe-Signature` header on the raw body with `STRIPE_WEBHOOK_SECRET` before it touches the database:
-no secret configured **503**; missing, bad or older-than-5-minutes signature **400**. Then:
-- `customer.subscription.created`, `.updated` and `.deleted` write the tenant's entitlement row, keyed by
-  `subscription.metadata.tenant_id`: `active` and `trialing` become `active` (clearing any failure and grace
-  period), `past_due` becomes `past_due` and keeps an existing grace period, any other Stripe status becomes
-  `canceled`, and `.deleted` is always `canceled`. One subscription per tenant is assumed: deleting any
-  subscription that carries the tenant's id cancels the tenant, so change a plan by updating the same one. An event
-  that shares the second of a cancel never reactivates the tenant (Stripe's `created` has one-second resolution and
-  delivery order is not guaranteed); a strictly newer `active` event does.
-- `invoice.payment_failed` finds the tenant by the customer id an earlier subscription event stored (an
-  unknown customer is `ignored`), sets `past_due` and a grace period of `GRACE_PERIOD_HOURS` (default 72) counted
-  from the first failure that arrives: Stripe's retries of the same failed invoice do not extend it, and an `active`
-  subscription event clears it. It does not reopen a `canceled` tenant. If `GRACE_PERIOD_HOURS` is not an
-  integer from 0 to 8760, a failure that has to open a grace window is **503** and not recorded, so Stripe
-  retries it; other events are unaffected.
-- Each event id is stored in the same transaction as its change: a redelivery is **200** `duplicate`. An event
-  older than the last one applied does not overwrite newer state (`stale`; two narrow exceptions, an older payment
-  failure and a delete of the stored subscription, are in [docs/billing.md](docs/billing.md)). Unknown tenants and unhandled event types
-  are `ignored`. Past the signature check every answer is 200 `{"status": ...}`, except a malformed event
-  (**400**), a body over 1 MiB (**413**) and a database failure (**503**; Stripe retries it).
-
-**6. A fail-closed edge.** `require_entitlement` (`app/edge.py`) guards `/v1/usage` and the charges route.
-The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
-status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
-Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
-a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open
-(the edge's own 503, "entitlement check unavailable", carries no `Retry-After`). A statement that runs more than 15 s on the request path is
-**504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on the routes whose database error reaches the
-handler in `app/main.py`, such as the charges route and the webhook route; `POST /v1/usage` and the entitlement edge catch it themselves and still answer 503. The
-rollup, reconcile and delinquent runs have no statement timeout.
-
-**7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and
-exits 0 when the stored rollups agree, 1 on drift (including a rollup row whose hour is not closed), 2 on bad input;
-`--actuals FILE.jsonl` also compares them with totals from another source. It always prints what is not billed (late
-events, events over 2 hours past their hour and still not closed, events dated over 1 hour ahead); `--fail-on-unbilled`
-makes any of them exit 1, `--json` prints one object ([docs/reconcile.md](docs/reconcile.md)). `python -m app.delinquent` lists `past_due` and `canceled` tenants
-with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`) using the edge's own grace rule
-([docs/billing.md](docs/billing.md)).
-
-**8. An optional ClickHouse copy.** With `CLICKHOUSE_URL` set, each closed hour's rollup rows are also written to ClickHouse
-(`docker compose --profile analytics`); a failure there is logged and never touches the bill, `python -m app.mirror --backfill`
-recovers it, and `--export-actuals` feeds `app.reconcile --actuals` ([docs/clickhouse.md](docs/clickhouse.md)). It is a derived copy, not the bill.
-
-**9. A platform adapter (`seekrflow`), not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
-response (chat, embeddings or the final stream chunk) into one usage event, with the response id as the idempotency key; a
-missing usage raises and is never counted as zero. It was built from the public API documentation and tested with
-hand-written fixtures, the real app and a local stand-in server. No call to the real service has been made: there is no key.
-[docs/seekrflow.md](docs/seekrflow.md) lists what was and was not verified.
+Nine parts, from an event arriving to an optional copy and the platform adapter: intake and its status codes, the append-only
+log, hourly rollups, versioned prices and charges, Stripe webhooks and entitlements, the fail-closed edge, two read-only
+reports, the ClickHouse copy and the adapter. Every rule and limit is in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## API
 
 | Method | Path | Success | Other answers |
 |--|--|--|--|
 | GET | `/healthz` | 200 `{"status": "ok"}` while the process is up (it says nothing about the database) | none; no edge check |
-| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 400, 403, 409, 413, 422, 503; edge 401, 402, 503 |
+| POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 400, 403, 409, 413, 422, 503, 504; edge 401, 402, 503 |
 | GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503, 504; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503, 504; no edge check, the signature is the check |
 
@@ -177,64 +129,3 @@ A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md
 - Usage after access is cut: once the edge answers 402, a tenant cannot send usage it had not sent yet, because `/v1/usage`
   sits behind the edge; the events are refused, not stored for later.
 
-## How it was built
-
-Claude Code sessions built this in one afternoon and evening, each in its own cockpit (a Zellij session with a lead tab, a
-review desk and a merge gate): one lead, two assistant devs, a standing advisor that the lead asked for second opinions,
-a review desk (DRC) and short-lived lanes for single jobs. [docs/build-log.md](docs/build-log.md) is the timestamped
-record; this is the short version.
-
-[docs/how-it-was-built.md](docs/how-it-was-built.md) explains how AI-written code was checked: the loop each lane was
-briefed to follow, the review rounds with their counts, what went wrong and the limits of the method.
-
-**Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI), one brief per
-dev, and was the only session allowed to merge. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
-built the price table, the Stripe webhooks, the entitlement record, the edge check and the first README. Later work came
-in as lanes, each a branch with its own worktree: reconcile, the delinquent report, the platform adapter, the design
-notes, the code tour, the runbook, the testing guide, the hardening fixes and four red-team reviews.
-
-**Gates.** A lane merged only when its branch contained the latest `main` with the tests run on that code, an
-independent review desk (DRC) had reviewed it, and the CI check `test` was green. The cockpit's merge
-command refuses without a review receipt for the branch, a head that contains the latest `main`, and green CI; commits
-added after the review (a merge of `main`, a small fix) and any finding left owed need the lead's written note. Each merge moved `main` and made the next
-branch stale, so the lead rebased the early lanes and merged `main` into the later ones, re-ran the tests and merged one
-lane at a time, each as its own pull request (`git log --first-parent --merges` lists them).
-
-**Hardening.** The lead ran adversarial agents in rounds: four read-only red-team lanes (money, concurrency, security,
-operations), each told to break the code on its own lens and to count a finding only with a command or a failing test
-that shows it; a second round of the same four; a narrow third pass on one fix; and a fifth lane that checked every
-sentence of the README and docs against the code from a clean clone. Round one found 0 blockers, 9 major and 10 minor. Seven of the majors changed code: a bill that names
-every unpriced model, a same-second event that could undo a cancel, a held lock that hung the whole API (now a 503), a paused
-database that hung it too (connecting now ends in a 503 after 5 s; a freeze after connecting still hangs, see
-[docs/ingest.md](docs/ingest.md)), a request body buffered before the 401 (now capped), and one poisoned rollup hour that
-blocked every later hour; two became documented behaviour (how a price change and a back-dated price apply). Round two re-ran each
-lane's own repros against the fixed code and attacked the fixes: 0 blockers reported (the operations report gives no count), 3 major, 7 minor. Two majors became code
-changes (a cancel older than an applied payment failure was lost; the database lives in a named volume now, because
-`docker compose down` followed by `up` had started an empty one); one is written down with its bound in
-[docs/ingest.md](docs/ingest.md) (a database that freezes after the connection was made). The review reports are in
-[docs/reviews/](docs/reviews/README.md), as written at the time.
-
-**What the gates and the cross-checks caught.**
-- DRC found that the hourly token sum can overflow a BIGINT column (now one failed hour that the others survive, and a
-  documented limit), a way around the body cap behind a path prefix, and folded fixes of its own into several lanes.
-- Reading each other's code, the devs found further defects. Dev A found that every repeated payment-failure webhook
-  pushed the grace window forward, which the DRC review of that lane had not flagged (fixed before merge). Dev B found
-  a test that could pass by accident because lock waits were counted cluster-wide, and that INFO log lines never reached
-  `docker compose logs` because nothing configured logging.
-- In the third DRC pass over the entitlements lane, the reviewer folded in a fix of its own and then flagged that same
-  fix as opening a fail-open case. The lead asked the advisor, which agreed the guard bought nothing inside
-  the one-subscription-per-tenant assumption, and reverted it; the assumption is documented. The advisor also noticed
-  that compose published a port next to a public dev secret, which became a loopback-only binding.
-- The advisor found that a documented limit was wrong (a cancel for a stored row whose tenant id the new id rule refuses was
-  ignored, and a lost cancel is never retried). The cancel fix had its test written first and watched failing.
-  DRC folded the daylight-saving fix without a test; the lead added a New York-session test and removed the
-  fix once to watch it fail.
-- Slips were caught and corrected on every side: the lead mistyped a commit hash in a review job, and named a base that a
-  lane did not contain; dev A force-pushed over a merge commit of the lead's, reported eight clean starts of a compose
-  change where the true count was seven, and pasted demo output from before its last commit (the lead re-ran the demo
-  itself); dev B started throwaway database containers on volumes of live test databases while looking for its own
-  (it reported this itself; reads afterwards found no damage; [docs/build-log.md](docs/build-log.md) records it at 19:29).
-
-**Where it hurt.** The review desk could not run the tests until a tracked `scripts/test` gave it a database; messages
-to one dev were silently held because the cockpit treats a checkout on a `lane/*` branch as a lane, which cannot read
-them; and the review desk takes one job at a time, so with a dozen branches waiting the queue, not the writing, set the pace.
