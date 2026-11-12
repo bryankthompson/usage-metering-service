@@ -181,7 +181,11 @@ holds the shared hour lock would block that hour's close for as long as it stays
 - **Building the index on an existing table.** `apply_schema` runs every `db/*.sql` in one transaction, so the statement is
   `CREATE INDEX IF NOT EXISTS`, not `CONCURRENTLY`. On a database that already holds a large `usage_events`, the first start after this change takes
   a write lock on that table while the index builds, so ingests wait (a 2 s lock wait then answers 503, see the timeouts below) until it
-  finishes. Applying the schema again afterwards does nothing. Not measured: the build time on a large table.
+  finishes. Applying the schema again afterwards does nothing. Measured (2026-11-11, one machine, Postgres 16 in docker): the build took 788 ms
+  on 1,000,000 rows (50 tenants, inserted in time order); on a much larger table the time grows with the rows (an estimate, not measured: tens
+  of millions of rows reach 15 s). `db.connect()` gives the connection the request path's 15 s statement timeout, and `apply_schema` runs under
+  it, so a build that takes longer is cancelled (`QueryCanceled`, checked: nothing is applied, the one transaction rolls back, and the index
+  is not left half built). For the first apply on a large table use `db.connect(statement_timeout_ms=0)`, which is what the rollup uses.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
 so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on every route after the entitlement edge (the edge answers 503 for its own read; `POST /v1/usage` re-raises it to the handler in `app/main.py`). A lock wait over 2 s and a failed connection stay 503. `/healthz` is an `async` route that touches
