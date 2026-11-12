@@ -319,6 +319,7 @@ def test_charge_rows_for_one_tenant_use_the_hour_range_index(conn):
     conn.commit()
     indexes = conn.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'usage_rollups_hourly_tenant_hour'")
     assert indexes.fetchone()["indexdef"].endswith("USING btree (tenant_id, hour_start, model)")
+    # seqscan off: this shows the index CAN serve the charges read, not that the planner picks it at the size docs/ingest.md measured
     conn.execute("SET enable_seqscan = off")
     params = {
         "tenant": "tenant-1",
