@@ -2,6 +2,8 @@
 
 > Review report as written at the time. File:line citations refer to the SHA named in the report, not to today's tree.
 
+> Note, 2026-11-11: in this report "the adapter" and "the adapter doc" are seekrflow (app/seekrflow.py, docs/seekrflow.md); no live call to the real service was ever made.
+
 SHA tested: 843163a1b3e2845d8a84beaa9012d5aebec1f8a4 (fresh clone, README "Run it" followed literally with
 COMPOSE_PROJECT_NAME=rt-claims API_PORT=18400 DB_PORT=15400).
 

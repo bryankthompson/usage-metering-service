@@ -2,6 +2,8 @@
 
 > Review report as written at the time. File:line citations refer to the SHA named in the report, not to today's tree.
 
+> Note, 2026-11-11: in this report "the platform adapter" is seekrflow (app/seekrflow.py); no live call to the real service was ever made.
+
 Attack scripts: a1.py to a4.py (uncommitted, own database rt_money in the shared test container).
 Counts: 0 BLOCKER, 3 MAJOR, 3 MINOR, 1 NOTE. Test suite not re-run (read-only lane; no product change).
 

@@ -15,6 +15,10 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   rebased onto the latest `main` and the tests run on the rebased code. Every branch gets a DRC review
   (an independent reviewer desk) and green CI before it merges.
 
+> Note, 2026-11-11: entries written before this date say the platform adapter is named only in its own files. The operator reversed that
+> on 2026-11-11: the adapter, `seekrflow`, is now named everywhere (see docs/how-it-was-built.md section 8). It still runs on hand-written
+> fixtures; no call to the real service has been made. The repo's own name stays generic.
+
 ## Log
 
 - **15:03** Requests to build this arrived at the lead as messages from two other cockpits. They were
