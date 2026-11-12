@@ -2,8 +2,8 @@
 
 The longer account of how the work was run. [how-it-was-built.md](how-it-was-built.md) covers the checks, the review rounds and the limits; this page covers the roles, the gates and what the gates and cross-checks caught.
 
-The first public version, PRs #1 to #44, took one afternoon and evening on 2026-11-10; merges ran from 15:30 to
-23:26. Work continued on 2026-11-11, from 14:02 to 23:58, and 2026-11-12, from 13:15 to 17:12 through #84
+The first build, PRs #1 to #44, took one afternoon and evening on 2026-11-10; merges ran from 15:30 to
+23:26, and the repo went public at about 22:25, at `dea36c8` (#41). Work continued on 2026-11-11, from 14:02 to 23:58, and 2026-11-12, from 13:15 to 17:12 through #84
 (all times US Central, UTC-6). Claude Code sessions
 worked largely unattended, with the lead, the advisor and the operator steering at decision points. Each session ran in
 its own cockpit (a Zellij session with a lead tab, a review desk and a merge gate): a lead, two assistant devs, a

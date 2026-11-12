@@ -321,10 +321,11 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   dev clone ran as lead of its own lanes and merged #53 to #71 through the same gate. Through #84, 69 merges carried a DRC
   receipt and 14 a written reason, including docs, CI steps, tests, one index, one compose line, a format commit shown
   AST-equal, a measurement script and a rebase of a head DRC had reviewed at high. DRC reviewed the request-path pool
-  (#67), batch ingest (#64) and charges paging (#65) at high. Outside reviewer rounds led to the pool, batch ingest,
-  charges paging, the CI smoke test and the rollup index.
+  (#67) and charges paging (#65) at high, and batch ingest (#64) at high before its rebase. The outside review of
+  2026-11-11 led to the pool, batch ingest, charges paging and the CI gates.
 
   CI gate changes put lint and the image build into the `test` job (#74), then added the compose smoke test that brings up
   the stack and runs `scripts/demo.sh` (#75). The throughput measurement was added in #82. Documentation work included
   the README frame (#77), docs walks (#78 and #80) and positive README wording (#79). PR #76 merged on the lead's written
-  reason after the advisor's ruling, CI green.
+  reason after the advisor's ruling, CI green; a DRC review at high of its index commit (`a64e911`, `db/001_usage.sql`) was
+  run afterwards on 2026-11-12 and found nothing.
