@@ -3,7 +3,7 @@
 price table -> refused without an entitlement -> signed Stripe event -> usage -> rollup -> charges
 -> a late event -> a failed payment, the grace window and recovery.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient

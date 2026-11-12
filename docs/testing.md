@@ -8,7 +8,7 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 
 | Layer | Command | Passes when | In CI |
 |--|--|--|--|
-| Tests, real Postgres 16 | `scripts/test` | the last line starts `N passed` (read N there; this file does not copy it; see the warning note below) | yes: `uv run pytest -q` |
+| Tests, real Postgres 16 | `scripts/test` | the last line starts `N passed` (read N there; this file does not copy it; see the warning note below) | yes: `uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92` |
 | One file | `scripts/test tests/test_attack_ingest.py` | same | (part of the above) |
 | End to end demo | `docker compose up -d --build`, then `scripts/demo.sh` | prints `demo ok` (price, signed webhook, usage, rollup, charges) | no |
 | Reconcile | `docker compose exec -T rollup python -m app.reconcile` | exit 0; 1 = drift, 2 = bad argument (docs/reconcile.md) | no |
@@ -23,8 +23,11 @@ The test run ends `N passed, 1 warning`: a Starlette deprecation notice about th
 instead"). It does not come from this code and is harmless.
 `scripts/test` prints a WARNING when an older shared `metering-test-db` publishes its port beyond 127.0.0.1 (it holds test data
 only). Run `docker rm -f metering-test-db` when no test run is in progress; the next `scripts/test` recreates it on 127.0.0.1.
-CI (`.github/workflows/ci.yml`) runs only the pytest line, on every pull request and push to `main`. The demo, flood and
-outage scripts are run by hand and are not in CI.
+CI (`.github/workflows/ci.yml`) runs, on every pull request and push to `main`, three jobs: `test` (`uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92`),
+`lint` (`uvx ruff@0.8.6 check .`, rules F and E9 from `ruff.toml`) and `docker` (`docker build .` and `docker compose config -q`).
+`.github/workflows/audit.yml` runs pip-audit weekly, by hand and when `uv.lock` or `pyproject.toml` changes; it is not a required check.
+No formatter and no type checker run yet. The demo, flood and outage scripts are run by hand and are not in CI.
+`pre-commit install` (with `uvx pre-commit` or pre-commit installed) makes git run the same ruff check before each commit; it rewrites nothing.
 
 ## 2. What the first round of tests and the review missed
 
