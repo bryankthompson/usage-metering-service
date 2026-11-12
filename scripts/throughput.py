@@ -81,7 +81,11 @@ def one_run(args, tenant, label):
     else:
         size = args.batch_size
         requests = [
-            ("/v1/usage/batch", json.dumps({"events": [event(i) for i in range(s, min(s + size, args.events))]}).encode(), min(size, args.events - s))
+            (
+                "/v1/usage/batch",
+                json.dumps({"events": [event(i) for i in range(s, min(s + size, args.events))]}).encode(),
+                min(size, args.events - s),
+            )
             for s in range(0, args.events, size)
         ]
 
