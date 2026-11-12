@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, NamedTuple
 
 import psycopg
+from psycopg.rows import DictRow
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BeforeValidator
 from pydantic_core import PydanticCustomError
@@ -47,7 +48,11 @@ def _require_int(value: object, name: str) -> None:
 
 
 def add_price_version(
-    conn: psycopg.Connection, model: str, effective_from: datetime, input_micros_per_1k: int, output_micros_per_1k: int
+    conn: psycopg.Connection[DictRow],
+    model: str,
+    effective_from: datetime,
+    input_micros_per_1k: int,
+    output_micros_per_1k: int,
 ) -> int:
     """Store the next version (1, 2, ...) for `model` and return its number. Commits.
 
@@ -67,15 +72,15 @@ def add_price_version(
     log.info(
         "price version added: model=%r version=%s effective_from=%s in=%s out=%s",
         model,
-        row["version"],
+        row["version"],  # type: ignore[index]  # INSERT ... SELECT with an aggregate always returns one row
         effective_from.isoformat(),
         input_micros_per_1k,
         output_micros_per_1k,
     )
-    return row["version"]
+    return row["version"]  # type: ignore[index]  # same row: always one
 
 
-def price_at(conn: psycopg.Connection, model: str, at: datetime) -> dict:
+def price_at(conn: psycopg.Connection[DictRow], model: str, at: datetime) -> dict:
     """The version with the greatest `effective_from <= at` (a tie goes to the later version).
 
     Raises NoPrice when the model has no version in force at `at`.
@@ -106,7 +111,7 @@ def _rate(version: dict, tokens_in: int, tokens_out: int) -> int:
     return (exact_thousandths + 500) // 1000
 
 
-def rate(conn: psycopg.Connection, model: str, tokens_in: int, tokens_out: int, at: datetime) -> int:
+def rate(conn: psycopg.Connection[DictRow], model: str, tokens_in: int, tokens_out: int, at: datetime) -> int:
     """Cost in micro-USD of the tokens at the price in force at `at`.
 
     Rule: (tokens_in * input_price + tokens_out * output_price) is divided by 1,000 in integer
@@ -174,7 +179,7 @@ ORDER BY hour_start, model
 
 
 def _charge_pass(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[DictRow],
     tenant_id: str,
     start: datetime,
     end: datetime,
@@ -276,7 +281,7 @@ def _charge_pass(
 
 
 def charge_lines(
-    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, max_lines: int | None = None
+    conn: psycopg.Connection[DictRow], tenant_id: str, start: datetime, end: datetime, max_lines: int | None = None
 ) -> tuple[list[dict], int]:
     """Rate every hourly rollup row of the tenant with `start <= hour_start < end`, each at its own hour_start.
 
@@ -291,7 +296,12 @@ def charge_lines(
 
 
 def charge_page(
-    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, limit: int, after: Cursor | None = None
+    conn: psycopg.Connection[DictRow],
+    tenant_id: str,
+    start: datetime,
+    end: datetime,
+    limit: int,
+    after: Cursor | None = None,
 ) -> Page:
     """At most `limit` lines of the range, those after `after` (the start when None). The total and the line count are the
     whole range's, and a missing price anywhere in it raises NoPrice, as for `charge_lines`. A pass is made per page."""
@@ -374,7 +384,7 @@ ORDER BY hour_start LIMIT %(limit)s
 
 
 def unclosed_hours(
-    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime
+    conn: psycopg.Connection[DictRow], tenant_id: str, start: datetime, end: datetime
 ) -> tuple[list[datetime], bool]:
     """The earliest UNCLOSED_LIMIT hours in [start, end) that hold usage the charges do not include yet, and whether there
     were more (the list is cut there, so the flag is how a caller knows)."""

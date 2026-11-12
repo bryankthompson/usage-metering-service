@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ CONNECT_TIMEOUT_S = 5
 REQUEST_STATEMENT_TIMEOUT_MS = 15_000
 
 
-def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) -> psycopg.Connection:
+def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) -> psycopg.Connection[DictRow]:
     """Open a connection that gives up after CONNECT_TIMEOUT_S, so a database that stops answering is a 503, not a hang.
 
     The default is the request path's: statements are cancelled after REQUEST_STATEMENT_TIMEOUT_MS (psycopg raises
@@ -49,7 +49,7 @@ def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) 
     return conn
 
 
-def _session_setup(conn: psycopg.Connection, statement_timeout_ms: int) -> None:
+def _session_setup(conn: psycopg.Connection[DictRow], statement_timeout_ms: int) -> None:
     # A session SET, not the `options` keyword: that would replace any options in the URL or PGOPTIONS.
     conn.execute(
         "SELECT set_config('statement_timeout', %s, false), set_config('TimeZone', 'UTC', false)",
@@ -66,7 +66,7 @@ DEFAULT_POOL_MAX = 40
 POOL_MIN = 2
 APPLICATION_NAME = "usage-metering-api"  # in pg_stat_activity: which sessions are the request path's pool
 
-_pool: ConnectionPool | None = None
+_pool: ConnectionPool[psycopg.Connection[DictRow]] | None = None
 _pool_lock = threading.Lock()
 _holding = threading.local()  # whether this thread has a pooled connection checked out
 
@@ -84,13 +84,13 @@ def _env_number(name: str, default: float, kind: type) -> float:
     return value
 
 
-def _configure_pooled(conn: psycopg.Connection) -> None:
+def _configure_pooled(conn: psycopg.Connection[DictRow]) -> None:
     """Runs once on each new physical connection. Ends in a commit: the pool wants it idle, and autocommit stays False,
     because every `pg_advisory_xact_*` and transaction-local `set_config` the request path uses needs a transaction."""
     _session_setup(conn, REQUEST_STATEMENT_TIMEOUT_MS)
 
 
-def _request_pool() -> ConnectionPool:
+def _request_pool() -> ConnectionPool[psycopg.Connection[DictRow]]:
     """The per-process pool, created on first use so importing the app (or starting it with the database down) opens nothing."""
     global _pool
     if _pool is None:
@@ -162,7 +162,7 @@ atexit.register(close_pool)
 LOCK_WAIT = "2s"  # how long a request waits for a lock before it answers 503; never used on the rollup (closing) side
 
 
-def limit_lock_wait(conn: psycopg.Connection) -> None:
+def limit_lock_wait(conn: psycopg.Connection[DictRow]) -> None:
     """For the rest of the current transaction, a wait for any lock longer than LOCK_WAIT raises LockNotAvailable.
 
     A request that waits for a held lock pins a worker thread and a connection; about 40 of them used up the worker pool, so
@@ -172,7 +172,7 @@ def limit_lock_wait(conn: psycopg.Connection) -> None:
     conn.execute("SELECT set_config('lock_timeout', %s, true)", (LOCK_WAIT,))
 
 
-def apply_schema(conn: psycopg.Connection) -> None:
+def apply_schema(conn: psycopg.Connection[DictRow]) -> None:
     """Run db/*.sql in filename order. Every file is repeatable."""
     for path in sorted(SCHEMA_DIR.glob("*.sql")):
         conn.execute(path.read_text())

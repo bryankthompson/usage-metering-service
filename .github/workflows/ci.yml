@@ -26,6 +26,9 @@ jobs:
       - run: uv sync --frozen
       # a step of `test`, not its own job: the merge gate reads only the check named `test`.
       - run: uvx ruff@0.8.6 format --check --diff .
+      # also a step of `test`; mypy is pinned (an unpinned one can go red with no code change) and comes in with --with,
+      # so pyproject.toml and uv.lock stay untouched. Settings are in mypy.ini; only app/ is checked.
+      - run: uv run --with mypy==2.4.1 mypy app
       # coverage floor: app/ measured 97% on 2026-11-11, the floor is 92 (a drop of a few points fails the job).
       # pytest-cov comes in with --with so pyproject.toml and uv.lock stay untouched.
       - run: uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92

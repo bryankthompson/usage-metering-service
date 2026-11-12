@@ -1,5 +1,5 @@
 # Lint rules: F (pyflakes: unused imports and names, undefined names) and E9 (syntax errors).
-# Formatter is on (ruff format, checked in CI and pre-commit); the type checker is the next PR.
+# Formatter is on (ruff format, checked in CI and pre-commit); mypy runs on app/ in CI (settings in mypy.ini).
 # CI and pre-commit both run the pinned ruff 0.8.6, so this file is the only config.
 line-length = 120
 target-version = "py312"

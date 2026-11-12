@@ -27,7 +27,7 @@ only). Run `docker rm -f metering-test-db` when no test run is in progress; the 
 CI (`.github/workflows/ci.yml`) runs, on every pull request and push to `main`, three jobs: `test` (`uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92`),
 `lint` (`uvx ruff@0.8.6 check .`, rules F and E9 from `ruff.toml`) and `docker` (`docker build .` and `docker compose config -q`).
 `.github/workflows/audit.yml` runs pip-audit weekly, by hand and when `uv.lock` or `pyproject.toml` changes; it is not a required check.
-`test` also starts with `uvx ruff@0.8.6 format --check --diff .` (line length 120, from `ruff.toml`); to reformat, run `uvx ruff@0.8.6 format .`. No type checker runs yet. The demo, flood and outage scripts are run by hand and are not in CI.
+`test` also starts with `uvx ruff@0.8.6 format --check --diff .` (line length 120, from `ruff.toml`); to reformat, run `uvx ruff@0.8.6 format .`. Then `uv run --with mypy==2.4.1 mypy app` runs the type checker on `app/` (non-strict, settings in `mypy.ini`, a stale `# type: ignore` fails). The demo, flood and outage scripts are run by hand and are not in CI.
 `pre-commit install` (with `uvx pre-commit` or pre-commit installed) makes git run the same ruff lint and format checks before each commit; it rewrites nothing.
 
 ## 2. What the first round of tests and the review missed

@@ -10,6 +10,7 @@ from datetime import timezone
 from typing import Annotated
 
 import psycopg
+from psycopg.rows import DictRow
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -147,7 +148,9 @@ def ingest_usage(
         raise _unavailable(err) from err
 
 
-def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Connection) -> dict[str, str | int | bool]:
+def _store(
+    event: UsageEvent, response: Response, tenant: str, conn: psycopg.Connection[DictRow]
+) -> dict[str, str | int | bool]:
     params = event.model_dump()
     db.limit_lock_wait(conn)  # a held hour lock is a 503 after db.LOCK_WAIT, not a pinned worker thread
     # Shared lock on the event's hour, held until commit: close_hour waits for this insert, and an
@@ -174,18 +177,18 @@ def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Con
             "usage conflict: tenant=%s key=%r reused with a different payload (event_id=%s)",
             tenant,
             event.idempotency_key,
-            existing["id"],
+            existing["id"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
         )
         raise HTTPException(status_code=409, detail="idempotency_key was already used with a different payload")
     log.info(
         "usage duplicate: tenant=%s key=%r event_id=%s late=%s",
         tenant,
         event.idempotency_key,
-        existing["id"],
-        existing["late"],
+        existing["id"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
+        existing["late"],  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
     )
     response.status_code = 200
-    return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}
+    return {"status": "duplicate", "event_id": existing["id"], "late": existing["late"]}  # type: ignore[index]  # fetchone() is a row here: the INSERT conflicted with an existing event
 
 
 # --- POST /v1/usage/batch -------------------------------------------------------------------------------------------
@@ -306,7 +309,9 @@ def ingest_usage_batch(
     return {"accepted": accepted, "duplicate": len(results) - accepted, "results": results}
 
 
-def _store_batch(events: list[UsageEvent], first: dict[str, int], tenant: str, conn: psycopg.Connection) -> list[dict]:
+def _store_batch(
+    events: list[UsageEvent], first: dict[str, int], tenant: str, conn: psycopg.Connection[DictRow]
+) -> list[dict]:
     db.limit_lock_wait(conn)
     # One shared lock per distinct hour, each its own statement, in ascending hour order, all BEFORE the INSERT: a lock
     # taken inside the INSERT would be taken after its snapshot, and an event could then be in neither the closed
