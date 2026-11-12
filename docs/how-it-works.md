@@ -15,6 +15,13 @@ they pass the cap, without buffering the rest (also with no credentials). A body
 example JSON nested very deep: measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400 from about
 10,077, so the boundary lies between those two numbers): **400**.
 
+`POST /v1/usage/batch` takes `{"events": [...]}`, 1 to 1000 events spanning at most 48 UTC hours (else **422**), each
+validated and deduplicated exactly as above, in one transaction: if any event is refused (403, 409, 422) or the database fails,
+nothing is stored and the whole batch can be resent. It answers **201** with `accepted`, `duplicate` and one `results` entry per event
+(`idempotency_key`, `status`, `event_id`, `late`) in input order, or **200** when every event was already stored. A key repeated inside the
+batch is one event; a repeat with a different payload is a 409 naming both indexes. The body cap is 7,363,012 bytes (413). Details,
+limits and measurements: [docs/ingest.md](ingest.md).
+
 **2. Into an append-only log.** Events are stored in `usage_events` (`db/001_usage.sql`); a trigger rejects
 every row UPDATE and DELETE; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the
 trigger). In compose the application connects as that superuser, so the trigger guards against mistakes, not against the

@@ -34,9 +34,64 @@ Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars 
   the hour ends, so a client that buffers through an outage and resends later than that gets `201` with `"late": true`
   and is never billed for that event.
 
-**Tests:** `scripts/test tests/test_ingest.py tests/test_attack_ingest.py` (own database on port 5455). The second file is the hostile-input, race and outage tests.
+**Tests:** `scripts/test tests/test_ingest.py tests/test_attack_ingest.py tests/test_ingest_batch.py` (own database on port 5455). The second file is the hostile-input, race and outage tests; the third is the batch route (below).
 
-**Does not do:** batch intake, or authentication beyond the edge dependency.
+**Does not do:** authentication beyond the edge dependency.
+
+## Batch intake: `POST /v1/usage/batch`
+
+Stores up to 1000 events in one request and one transaction, behind the same edge check. Body: `{"events": [<event>, ...]}`, each
+event exactly as for `POST /v1/usage`. **All or nothing:** if any event is refused, or the transaction fails, nothing of the
+batch is stored, so a resend of the whole batch is always safe. Each event is deduplicated by the single route's rule
+(`(tenant_id, idempotency_key)`, same payload is a duplicate, different payload is a conflict), and the `late` flag is the same
+expression, evaluated per event. `_same_payload` in `app/ingest.py` is the one payload comparison both routes use.
+
+Success body: `{"accepted": N, "duplicate": N, "results": [{"idempotency_key", "status", "event_id", "late"}, ...]}`, one result per
+input event in input order. `status` is `accepted` or `duplicate`, `event_id` and `late` are those of the stored row.
+
+| Status | When |
+|--|--|
+| 201 | at least one event was newly stored |
+| 200 | every event was already stored (a resend of a whole batch): nothing stored |
+| 403 | an event's `tenant_id` is not the tenant the edge admitted; the detail names the index (`events[i]`), nothing is stored, the check runs before any database work |
+| 409 | an event reuses a key with a different payload, either against a stored event or against another event in the same batch; the detail names the index (or both indexes), nothing is stored |
+| 413 | the body is over 7,363,012 bytes (`MAX_BATCH_BODY_BYTES`, below). Same mechanics as the single route's 413: from `Content-Length` or while the stream arrives, before parsing and before the edge runs |
+| 422 | invalid body: an invalid event (the same rules as the single route; `loc` names the index, never the input), no events, more than 1000 events, or events spanning more than 48 UTC hours |
+| 400, 401 / 402 / 503, 504, 503 | as for the single route (unparseable body; the edge refused; a statement past 15 s; the database went away or a lock wait ran out, `Retry-After: 1`). Nothing is stored in any of them |
+
+**One bad event rejects the other 999.** The 4xx names the index of the bad event (a 422 lists every invalid one; a 403 or 409 the first), so a client fixes or drops that one and
+resends the rest. Events from different tenants cannot be mixed in a batch: the first one that is not the edge's tenant gives 403.
+
+**Repeats inside a batch.** A key sent twice in one batch is one event: the first copy is stored (`accepted`), a later identical
+copy is reported `duplicate` with the same `event_id`, a later different copy is a 409 naming both indexes. This is decided in
+Python before the database is opened, because the INSERT would otherwise keep an arbitrary copy.
+
+**How it stays correct.**
+- One `INSERT ... SELECT ... FROM unnest(...) ORDER BY tenant_id, idempotency_key ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+  RETURNING`. The keys that did not insert are read back in one query and compared with `_same_payload`. The `ORDER BY` makes every
+  batch insert in the same key order, so two overlapping batches queue on the unique index instead of deadlocking.
+- **Hour locks:** before the INSERT, one shared hour lock per distinct UTC hour, each its own statement, in ascending hour order and held to commit,
+  as the single route does for its one hour (see Rollups). The lock must come before the INSERT's snapshot, so it is never folded into the INSERT.
+  Ascending order keeps two batches from waiting on each other's hours. An event is therefore in its closed rollup or flagged `late`,
+  never neither; `test_ingest_batch.py` races batches against `close_hour` for this.
+- **Why at most 48 hours:** each distinct hour is one lock in Postgres's shared lock table (6,400 slots by default), and each lock wait can cost the full 2 s,
+  so H hours can wait H x 2 s, which passes the 15 s statement timeout and answers 504 (the lock wait is bounded per lock, not per request). A real batch spans a
+  few hours. A full lock table fails the lock request with "out of shared memory", a 503; it does not block other sessions.
+  Hours are counted in UTC, whatever offset the timestamps are written in.
+- **Why a JSON array plus `unnest`, not NDJSON plus `COPY`:** the body is validated by the same pydantic model as the single route, so the rules cannot drift
+  apart, and one INSERT with `ON CONFLICT` gives the single route's dedupe and `late` rule per row; `COPY` cannot skip a conflicting row, and a staging table would be more machinery for the same result.
+
+**The body cap.** `MAX_BATCH_BODY_BYTES` = 7,363,012 is the size of 1000 maximal events in the `{"events": [...]}` envelope: three
+200-character non-BMP text fields (12 bytes per character as the `\ud83d\ude00` escape Python's `json.dumps` writes), both token counts 10^12 and the longest timestamp spelling,
+in `json.dumps` spacing. A body one byte over is a 413; padding such as extra fractional digits or whitespace can push a valid batch over it, as on the single route.
+
+**Measured (2026-11-11, Postgres 16 in a container on a WSL2 laptop; times move with the machine, no throughput claim).**
+- Validating the body (pydantic plus the checks above, no database) took about 1.5 ms for 1000 ordinary events and about 3 ms for 1000
+  maximal ones, so it runs on the request thread; it is not moved to a worker.
+- **1000 maximal events do not fit in the statement timeout.** 1000 events whose three text fields are near-identical 200-emoji strings exceeded the 15 s
+  statement timeout (504, nothing stored). The cost is the glibc `en_US.utf8` collation comparing such strings in the unique index, about 40 ms per row;
+  the single route pays the same per event. A real batch of ordinary events is far from it, and the tests do not insert 1000 maximal rows for that reason (they
+  insert 10, and check the cap by size alone).
 
 # Rollups (`app/rollup.py`)
 
