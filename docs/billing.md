@@ -72,10 +72,19 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   now historical: it can no longer be built. A body of `LINE_CAP` lines is about 1.2 MiB and peaked at about 6 MiB of Python
   allocations in `tests/test_charges_paging.py` (tracemalloc, one request), so 40 concurrent ones are about 230 MiB; the first page
   of 1,002,096 rows peaked at under 1 MiB. Numbers of one run on one machine, not a promise.
+- **Time of a pass.** Measured on 2026-11-11 on one development machine (Postgres 16 in docker on the same host), through the real
+  route with `limit` 100, best of 3: a full-year range of 1,002,096 rows (114 models x 366 days) took 2.07 s on the first page and
+  2.06 s on a page near the end of the range (runs of 2.07 to 2.24 s and 2.06 to 2.19 s), about 485,000 rows per second. A page
+  late in the range costs the same as the first, since every page rates every row. The whole pass has one deadline,
+  `REQUEST_STATEMENT_TIMEOUT_MS` (15 s). A range whose pass exceeds it is a 504 `query timed out` on every page, because every
+  page repeats the same pass: the client must then ask for a shorter range. Rows divided by 485,000 gives your range's pass in
+  seconds on a comparable machine (a slower or busier host, or concurrent requests, will be slower), so 15 s corresponds to about
+  7 million rows. The year of 114 models measured here is a seventh of that; a tenant with about 800 models over a year (8,784 rows each) would reach it.
+  One run's figures, not a promise.
 - **Index.** `(tenant_id, hour_start, model)` on `usage_rollups_hourly` was measured and not added. On 1,083,456 rows (114 models x
   366 days for one tenant plus a month of another), `EXPLAIN (ANALYZE, BUFFERS)` of the whole-year read: without the index a
   parallel sequential scan plus an external-merge sort (about 48 MB of temporary files in three workers), 557 ms; with it an index scan
-  with no sort, 268 ms. One week (19,152 rows): 30 ms against 18 ms. The pass in Python takes seconds for 1M rows, so the sort is
+  with no sort, 268 ms. One week (19,152 rows): 30 ms against 18 ms. A full pass in Python over 1,002,096 rows takes about 2.1 s (see "Time of a pass"), so the sort is
   not what a page waits for, and the index would cost 60 MB (the table is 87 MB) and a write on every hourly close. Revisit when
   the table holds many tenants' history: the sequential scan reads all of it for any range, and the index would not.
 
