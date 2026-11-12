@@ -88,12 +88,15 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   holds a slot for its whole pass: about 2 s for the year above, up to the 15 s deadline. Forty such requests at once take every slot of
   a worker with the default `DB_POOL_MAX` of 40, and ingest requests then wait up to `DB_POOL_TIMEOUT` (5 s) and answer 503. An
   estimate from the figures above, not a measurement under the pool.
-- **Index.** `(tenant_id, hour_start, model)` on `usage_rollups_hourly` was measured and not added. On 1,083,456 rows (114 models x
-  366 days for one tenant plus a month of another), `EXPLAIN (ANALYZE, BUFFERS)` of the whole-year read: without the index a
+- **Index.** `(tenant_id, hour_start, model)` on `usage_rollups_hourly` was measured twice and added on 2026-11-12. On 1,083,456 rows
+  (114 models x 366 days for one tenant plus a month of another), `EXPLAIN (ANALYZE, BUFFERS)` of the whole-year read: without the index a
   parallel sequential scan plus an external-merge sort (about 48 MB of temporary files in three workers), 557 ms; with it an index scan
-  with no sort, 268 ms. One week (19,152 rows): 30 ms against 18 ms. A full pass in Python over 1,002,096 rows takes about 2.1 s (see "Time of a pass"), so the sort is
-  not what a page waits for, and the index would cost 60 MB (the table is 87 MB) and a write on every hourly close. Revisit when
-  the table holds many tenants' history: the sequential scan reads all of it for any range, and the index would not.
+  with no sort, 268 ms. One week (19,152 rows): 30 ms against 18 ms. A full pass in Python over 1,002,096 rows takes about 2.1 s (see
+  "Time of a pass"), so on a whole-year page the sort is not what the page waits for. On a one-day page the read dominates: 2,736 rows took
+  1.1 ms through the index, 20 ms through the primary key (about 4,100 index pages, the tenant's whole key range), and 24.5 ms for the
+  sequential scan the planner chose before the index existed (`docs/ingest.md`, 501,600 rows for one tenant). A bill view asks for days, so
+  the index was added. It costs about 60 MB on the 1M-row table (the table is 87 MB) and one more btree write on every hourly close. One
+  run's figures on one machine, not a promise.
 
 ## Tests
 `DATABASE_URL=... uv run pytest -q tests/test_pricing.py tests/test_pricing_charges.py` (needs Postgres, see `compose.yaml`).
