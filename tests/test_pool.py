@@ -286,14 +286,14 @@ class Proxy:
             pass
         self.listener.close()
         self.acceptor.join(timeout=5)
-        assert not self.acceptor.is_alive(), "the proxy's accept thread did not stop"
-        for s in self.sockets:
+        sockets, self.sockets = self.sockets, []
+        for s in sockets:
             try:
                 s.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             s.close()
-        self.sockets = []
+        assert not self.acceptor.is_alive(), "the proxy's accept thread did not stop"      # after the cleanup, which always runs
 
     @property
     def url(self):
