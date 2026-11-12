@@ -35,3 +35,20 @@ jobs:
       - run: uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92
       - run: docker build -t usage-metering-service:ci .
       - run: docker compose config -q
+      # End-to-end smoke, the last steps of `test` (the merge gate reads only that check): bring the compose stack up,
+      # run scripts/demo.sh (price, signed webhook, tenant edge, usage, rollup, charges; it prints `demo ok`), tear down.
+      # This job's postgres service holds 5432, so the stack's db publishes 5433 (DB_PORT); the containers reach their own
+      # db by service name and never use this job's DATABASE_URL.
+      - name: smoke, stack up
+        env:
+          DB_PORT: "5433"
+        run: docker compose up -d --build --wait --wait-timeout 120
+      - name: smoke, scripts/demo.sh
+        timeout-minutes: 3
+        run: scripts/demo.sh
+      - name: smoke, compose logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: smoke, stack down
+        if: always()
+        run: docker compose down -v
