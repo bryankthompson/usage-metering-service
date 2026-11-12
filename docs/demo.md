@@ -79,7 +79,7 @@ expected 200, got 500`) and the rollup container restarts in a loop (`no pg_hba.
 `pg_isready`, the api's is `/healthz` (the process only) and the rollup has none. Check with
 `docker compose exec -T db psql -U metering -d metering -c '\dt'`, which lists the tables on a good stack. The way back is
 `docker compose down -v`, then `docker compose up -d --build --wait` again: a first start holds no data to keep, and
-`down -v` deletes the volume. Seven kills of the db container at different points of the first start, each followed by
+`down -v` deletes the volume. Eight kills of the db container at five different points of the first start, each followed by
 that fix, all ended at `demo ok`.
 To add a column that a newer `db/` file brings to a stack that has data, apply the schema to the running stack, which keeps
 the data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`
