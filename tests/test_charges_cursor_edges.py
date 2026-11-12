@@ -2,6 +2,7 @@
 
 Own file: the paging contract itself is in test_charges_paging.py.
 """
+import base64
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -122,3 +123,12 @@ def test_a_deeply_nested_cursor_is_malformed_not_a_recursion_error():
     t = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="malformed cursor"):
         pricing.decode_cursor(text, "t", t, t)
+
+
+def test_a_deeply_nested_cursor_through_the_route_is_422_not_500(client_for, conn):
+    seed(conn, "tenant-1", "m1", datetime(2026, 11, 1, tzinfo=timezone.utc), 3)
+    cursor = base64.urlsafe_b64encode(b"[" * 6000).decode()
+    assert len(cursor) < 8192                                           # under the length cap: the JSON reader is reached
+    resp = client_for("tenant-1").get("/v1/tenants/tenant-1/charges", params={
+        "start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z", "limit": 1, "cursor": cursor})
+    assert resp.status_code == 422 and "malformed cursor" in resp.json()["detail"]
