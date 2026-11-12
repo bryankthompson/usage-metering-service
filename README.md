@@ -103,7 +103,17 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   anonymous volume: dump it with `pg_dump --data-only` before switching ([docs/demo.md](docs/demo.md)).
 
 The compose file sets a fake `STRIPE_WEBHOOK_SECRET` (`whsec_test_...`). It sits in this public repo, so anyone who reads it could sign a webhook for a stack run as it is: never expose such a stack. Settings the code reads:
-`DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`, `LOG_LEVEL` (default `INFO`; an invalid value falls back to it), `DB_POOL_MAX` (most connections one API process borrows from its pool; default 40; a number above 0) and `DB_POOL_TIMEOUT` (seconds a request waits for a free connection before it answers 503; default 5, the connect timeout; a number above 0). To test against your own database:
+`DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, `GRACE_PERIOD_HOURS`, `LOG_LEVEL` (default `INFO`; an invalid value falls back to it), `DB_POOL_MAX` (most connections one API process borrows from its pool; default 40; a number above 0) and `DB_POOL_TIMEOUT` (seconds a request waits for a free connection before it answers 503; default 5, the connect timeout; a number above 0).
+Under compose the api gets `LOG_LEVEL` from your shell and the fake `STRIPE_WEBHOOK_SECRET`; the other settings reach it through a
+compose override file, which Compose reads on its own as `compose.override.yaml` beside `compose.yaml` (example values):
+
+```yaml
+services:
+  api:
+    environment: {GRACE_PERIOD_HOURS: "24", DB_POOL_MAX: "10", DB_POOL_TIMEOUT: "2"}
+```
+
+To test against your own database:
 `DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
 on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
 How it is tested, with a burst check and a database outage check you can run on a live stack, and what is not covered: [docs/testing.md](docs/testing.md).
