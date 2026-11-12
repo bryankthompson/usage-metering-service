@@ -1,5 +1,6 @@
 """Stripe `created` has one-second resolution and delivery order is not guaranteed: two events of the same second are
 applied in arrival order, except that a tie never undoes a cancel (RT-security-1 / RT-concurrency-1)."""
+
 import logging
 
 import pytest
@@ -25,8 +26,11 @@ def client():
 
 def edge_status(client, tenant="tenant-1") -> int:
     """What the real edge says to this tenant right now: 200 allowed, 402 denied."""
-    return client.get(f"/v1/tenants/{tenant}/charges", headers={"X-Tenant-Id": tenant},
-                      params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"}).status_code
+    return client.get(
+        f"/v1/tenants/{tenant}/charges",
+        headers={"X-Tenant-Id": tenant},
+        params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
+    ).status_code
 
 
 def cancel(client, how: str, event_id: str, created: int = T):
@@ -39,14 +43,19 @@ def cancel(client, how: str, event_id: str, created: int = T):
 def test_a_same_second_active_event_after_a_cancel_does_not_reactivate(client, conn, how):
     post(client, subscription_event("evt_1", T, status="active"))
     assert cancel(client, how, "evt_2").json() == {"status": "processed"} and edge_status(client) == 402
-    resp = post(client, subscription_event("evt_3", T, status="active"))            # late delivery, the same second
+    resp = post(client, subscription_event("evt_3", T, status="active"))  # late delivery, the same second
     assert resp.json() == {"status": "stale"}
     assert (row(conn)["status"], edge_status(client)) == ("canceled", 402)
 
 
-@pytest.mark.parametrize("status, event_type", [
-    ("active", "customer.subscription.created"), ("trialing", "customer.subscription.updated"),
-    ("past_due", "customer.subscription.updated")])
+@pytest.mark.parametrize(
+    "status, event_type",
+    [
+        ("active", "customer.subscription.created"),
+        ("trialing", "customer.subscription.updated"),
+        ("past_due", "customer.subscription.updated"),
+    ],
+)
 def test_no_same_second_non_cancel_event_gets_past_a_cancel(client, conn, status, event_type):
     cancel(client, "deleted", "evt_1")
     resp = post(client, subscription_event("evt_2", T, status=status, event_type=event_type))

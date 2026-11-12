@@ -1,6 +1,7 @@
 """Every connection the app opens pins its session time zone to UTC, so a PGTZ, a URL option or the server's own setting
 cannot change what the driver hands back (RT claims lens: under America/New_York, reconcile printed the local clock hour
 with a literal Z, charges/409/delinquent printed `-05:00`, and a year-one date was a 500)."""
+
 import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -47,7 +48,7 @@ def test_a_connection_reports_utc_whatever_the_environment_says(new_york):
     connection = db.connect()
     try:
         assert show(connection, "TimeZone") == "UTC"
-        assert show(connection, "statement_timeout") == "15s"          # the setting it shares a statement with is still set
+        assert show(connection, "statement_timeout") == "15s"  # the setting it shares a statement with is still set
     finally:
         connection.close()
 
@@ -90,8 +91,11 @@ def test_reconcile_names_the_utc_hour_of_a_drift_line(conn, new_york, capsys):
 def test_charges_hour_start_is_z_not_the_session_offset(client, conn, new_york):
     add_price_version(conn, "m", datetime(2020, 1, 1, tzinfo=timezone.utc), 1000, 1000)
     conn.execute("INSERT INTO closed_hours (hour_start) VALUES (%s)", (H,))
-    conn.execute("INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-                 " VALUES ('t1', 'm', %s, 1000, 0, 1)", (H,))
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " VALUES ('t1', 'm', %s, 1000, 0, 1)",
+        (H,),
+    )
     conn.commit()
     r = client.get("/v1/tenants/t1/charges", params=RANGE)
     assert (r.status_code, [line["hour_start"] for line in r.json()["lines"]]) == (200, [HOUR_Z])
@@ -99,8 +103,11 @@ def test_charges_hour_start_is_z_not_the_session_offset(client, conn, new_york):
 
 def test_the_409_text_names_the_hour_in_utc(client, conn, new_york):
     conn.execute("INSERT INTO closed_hours (hour_start) VALUES (%s)", (H,))
-    conn.execute("INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-                 " VALUES ('t1', 'unpriced', %s, 1, 1, 1)", (H,))
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " VALUES ('t1', 'unpriced', %s, 1, 1, 1)",
+        (H,),
+    )
     conn.commit()
     r = client.get("/v1/tenants/t1/charges", params=RANGE)
     assert (r.status_code, r.json()["detail"]) == (409, "no price for model 'unpriced' at 2026-11-10T10:00:00+00:00")
@@ -109,8 +116,10 @@ def test_the_409_text_names_the_hour_in_utc(client, conn, new_york):
 def test_delinquent_json_gives_utc_offsets(conn, new_york, capsys, monkeypatch):
     now = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(edge, "now", lambda: now)
-    conn.execute("INSERT INTO entitlements (tenant_id, status, payment_failed_at, grace_until) VALUES ('a', 'past_due', %s, %s)",
-                 (now - timedelta(hours=1), now + timedelta(hours=5)))
+    conn.execute(
+        "INSERT INTO entitlements (tenant_id, status, payment_failed_at, grace_until) VALUES ('a', 'past_due', %s, %s)",
+        (now - timedelta(hours=1), now + timedelta(hours=5)),
+    )
     conn.commit()
     delinquent.main(["--json"])
     row = json.loads(capsys.readouterr().out.splitlines()[0])
@@ -126,8 +135,11 @@ def test_a_year_one_event_is_accepted_and_resent_not_a_500(client, conn, new_yor
 def test_a_year_one_price_version_does_not_break_charges(client, conn, new_york):
     add_price_version(conn, "m", YEAR_ONE, 1000, 1000)
     conn.execute("INSERT INTO closed_hours (hour_start) VALUES (%s)", (H,))
-    conn.execute("INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-                 " VALUES ('t1', 'm', %s, 1000, 0, 1)", (H,))
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " VALUES ('t1', 'm', %s, 1000, 0, 1)",
+        (H,),
+    )
     conn.commit()
     r = client.get("/v1/tenants/t1/charges", params=RANGE)
     assert (r.status_code, r.json()["total_micros"]) == (200, 1000)

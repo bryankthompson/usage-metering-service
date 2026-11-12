@@ -7,6 +7,7 @@ Standard library only.
     python -m app.seekrflow replay FILE.json --tenant T [--api URL] [--model M]
     python -m app.seekrflow live --tenant T --prompt TEXT [--api URL] [--spool FILE]     (needs SEEKR_API_KEY)
 """
+
 import argparse
 import json
 import os
@@ -46,7 +47,9 @@ def usage_event(response: dict, tenant_id: str, model: str | None = None) -> dic
         raise MissingUsage(f"response created is missing or not an integer: {created!r}")
     model = response.get("model") or model
     if not model:
-        raise MissingUsage(f"response {response.get('id')!r} has no model (embeddings responses have none): pass --model")
+        raise MissingUsage(
+            f"response {response.get('id')!r} has no model (embeddings responses have none): pass --model"
+        )
     return {
         "tenant_id": tenant_id,
         "idempotency_key": response["id"],
@@ -59,6 +62,7 @@ def usage_event(response: dict, tenant_id: str, model: str | None = None) -> dic
 
 class _Refuse(urllib.request.HTTPRedirectHandler):
     """A redirect would carry the API key to another origin: surface it as an HTTP error instead."""
+
     def redirect_request(self, *args, **kwargs):
         return None
 
@@ -71,10 +75,10 @@ def _post_json(url: str, body: dict, headers: dict) -> tuple[int, dict]:
     try:
         with _NO_REDIRECT.open(request, timeout=30) as reply:
             return reply.status, json.load(reply)
-    except urllib.error.HTTPError as err:   # an answer with an error status; a transport error propagates
+    except urllib.error.HTTPError as err:  # an answer with an error status; a transport error propagates
         try:
             return err.code, json.load(err)
-        except ValueError:   # a redirect or a proxy page has no JSON body: keep the status, drop the body
+        except ValueError:  # a redirect or a proxy page has no JSON body: keep the status, drop the body
             return err.code, {}
 
 
@@ -87,7 +91,7 @@ def fetch_chat(api_base: str, api_key: str, body: dict) -> dict:
     """POST a chat-completion request. The docs show the key as the bare Authorization value, no "Bearer"."""
     status, reply = _post_json(f"{api_base}/inference/chat/completions", body, {"Authorization": api_key})
     if status != 200:
-        raise RuntimeError(f"chat completion answered {status}")   # the reply is left out: it could echo the request
+        raise RuntimeError(f"chat completion answered {status}")  # the reply is left out: it could echo the request
     return reply
 
 
@@ -96,8 +100,7 @@ def _send(response: dict, tenant: str, api: str, model: str | None = None) -> No
     status, body = post_usage(event, api, tenant)
     if status not in (200, 201):
         raise RuntimeError(f"intake answered {status}: {body}")
-    print(f"{event['idempotency_key']} in={event['tokens_in']} out={event['tokens_out']} "
-          f"{status} {body['status']}")
+    print(f"{event['idempotency_key']} in={event['tokens_in']} out={event['tokens_out']} " f"{status} {body['status']}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,7 +111,10 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--model", help="model to use for a response that omits it (embeddings)")
     live = sub.add_parser("live", help="call the service once and post its usage (needs SEEKR_API_KEY)")
     live.add_argument("--prompt", required=True)
-    live.add_argument("--spool", help="save the response to this file before posting, so a failed post can be replayed (off by default)")
+    live.add_argument(
+        "--spool",
+        help="save the response to this file before posting, so a failed post can be replayed (off by default)",
+    )
     for p in (replay, live):
         p.add_argument("--tenant", required=True)
         p.add_argument("--api", default=DEFAULT_API, help=f"our intake (default {DEFAULT_API})")
@@ -126,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError("SEEKR_API_KEY is not set")
             body = {"model": DEFAULT_MODEL, "messages": [{"role": "user", "content": args.prompt}]}
             response = fetch_chat(args.base, key, body)
-            if args.spool:   # saved first: a failed post can be replayed, the usage is not lost
+            if args.spool:  # saved first: a failed post can be replayed, the usage is not lost
                 with open(args.spool, "w") as f:
                     json.dump(response, f)
                 print(f"saved {args.spool}", file=sys.stderr)

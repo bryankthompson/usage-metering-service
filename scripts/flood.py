@@ -8,6 +8,7 @@ Makes a fresh tenant (a signed subscription event, with the fake dev secret from
 usage events from CLIENTS threads over REQUESTS/2 keys, so half are resends. Passes only if the answers are exactly
 REQUESTS/2 x 201 and the rest 200 (no 503, no 500) and the api log gained no "Traceback".
 """
+
 import collections, concurrent.futures as cf, hashlib, hmac, json, os, subprocess, sys, time, urllib.error, urllib.request
 from datetime import datetime, timezone
 
@@ -28,10 +29,23 @@ def post(path, body, headers):
 
 def provision():
     n = str(time.time_ns())
-    sub = {"id": "sub_" + n, "object": "subscription", "customer": "cus_" + n, "status": "active",
-           "metadata": {"tenant_id": "flood-" + n}, "items": {"data": [{"price": {"id": "price_flood"}}]}}
-    payload = json.dumps({"id": "evt_" + n, "object": "event", "type": "customer.subscription.updated",
-                          "created": int(time.time()), "data": {"object": sub}}).encode()
+    sub = {
+        "id": "sub_" + n,
+        "object": "subscription",
+        "customer": "cus_" + n,
+        "status": "active",
+        "metadata": {"tenant_id": "flood-" + n},
+        "items": {"data": [{"price": {"id": "price_flood"}}]},
+    }
+    payload = json.dumps(
+        {
+            "id": "evt_" + n,
+            "object": "event",
+            "type": "customer.subscription.updated",
+            "created": int(time.time()),
+            "data": {"object": sub},
+        }
+    ).encode()
     stamp = int(time.time())
     sig = hmac.new(SECRET.encode(), f"{stamp}.".encode() + payload, hashlib.sha256).hexdigest()
     status = post("/v1/stripe/webhook", payload, {"Stripe-Signature": f"t={stamp},v1={sig}"})
@@ -62,8 +76,14 @@ hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
 
 
 def send(i):
-    body = {"tenant_id": tenant, "idempotency_key": f"{run}-{i % (total // 2)}", "model": "demo-model",
-            "tokens_in": 1, "tokens_out": 1, "occurred_at": hour}
+    body = {
+        "tenant_id": tenant,
+        "idempotency_key": f"{run}-{i % (total // 2)}",
+        "model": "demo-model",
+        "tokens_in": 1,
+        "tokens_out": 1,
+        "occurred_at": hour,
+    }
     return post("/v1/usage", json.dumps(body).encode(), {"X-Tenant-Id": tenant})
 
 

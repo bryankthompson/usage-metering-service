@@ -8,6 +8,7 @@ the JSON lines file `python -m app.reconcile --actuals` reads. See docs/clickhou
 
 CLI: `python -m app.mirror --backfill | --export-actuals FILE`.
 """
+
 import argparse
 import http.client
 import json
@@ -59,8 +60,12 @@ def clickhouse_url() -> str | None:
 def _post(url: str, query: str, body: bytes = b"") -> bytes:
     """One HTTP POST to ClickHouse. Raises on a refused connection, a timeout or a non-2xx answer (with its text)."""
     parts = urllib.parse.urlsplit(url)  # keep query parameters already in the URL (database, user), set ours
-    params = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k != "query"] + [("query", query)]
-    full = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/") + "/", urllib.parse.urlencode(params), ""))
+    params = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k != "query"] + [
+        ("query", query)
+    ]
+    full = urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path.rstrip("/") + "/", urllib.parse.urlencode(params), "")
+    )
     request = urllib.request.Request(full, data=body, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
@@ -93,13 +98,22 @@ def write_rows(url: str, rows: list[dict]) -> None:
         return
     for r in rows:
         if not MIN_HOUR <= _utc(r["hour_start"]) <= MAX_HOUR:
-            raise ValueError(f"hour {_utc(r['hour_start']).isoformat()} is outside ClickHouse DateTime (1970-01-01 to 2106-02-07 UTC)")
+            raise ValueError(
+                f"hour {_utc(r['hour_start']).isoformat()} is outside ClickHouse DateTime (1970-01-01 to 2106-02-07 UTC)"
+            )
     version = int(datetime.now(timezone.utc).timestamp() * 1_000_000)  # a later write of a row wins
     lines = [
-        json.dumps({
-            "tenant_id": r["tenant_id"], "model": r["model"], "hour_start": _utc(r["hour_start"]).strftime("%Y-%m-%d %H:%M:%S"),
-            "tokens_in": r["tokens_in"], "tokens_out": r["tokens_out"], "event_count": r["event_count"], "version": version,
-        })
+        json.dumps(
+            {
+                "tenant_id": r["tenant_id"],
+                "model": r["model"],
+                "hour_start": _utc(r["hour_start"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "tokens_in": r["tokens_in"],
+                "tokens_out": r["tokens_out"],
+                "event_count": r["event_count"],
+                "version": version,
+            }
+        )
         for r in rows
     ]
     _post(url, CREATE_TABLE)
@@ -135,7 +149,9 @@ def mirror_hours(closed: list[tuple[datetime, list[dict]]]) -> None:
     down = False
     for hour, rows in closed:
         if down:
-            log.error("clickhouse mirror skipped: hour=%s after an earlier failure in this pass", _utc(hour).isoformat())
+            log.error(
+                "clickhouse mirror skipped: hour=%s after an earlier failure in this pass", _utc(hour).isoformat()
+            )
             continue
         try:
             write_rows(url, rows)
@@ -148,8 +164,10 @@ def mirror_hours(closed: list[tuple[datetime, list[dict]]]) -> None:
 
 def read_mirror(url: str) -> dict[tuple, tuple[int, int, int]]:
     """Every (tenant, model, hour) in ClickHouse with its (tokens_in, tokens_out, event_count), duplicates collapsed."""
-    query = (f"SELECT tenant_id, model, toUnixTimestamp(hour_start) AS ts, tokens_in, tokens_out, event_count "
-             f"FROM {TABLE} FINAL FORMAT JSONEachRow")
+    query = (
+        f"SELECT tenant_id, model, toUnixTimestamp(hour_start) AS ts, tokens_in, tokens_out, event_count "
+        f"FROM {TABLE} FINAL FORMAT JSONEachRow"
+    )
     out = {}
     _post(url, CREATE_TABLE)
     for line in _post(url, query).splitlines():
@@ -200,12 +218,24 @@ def export_actuals(conn, url: str, path: str) -> tuple[int, list[datetime]]:
     conn.commit()
     orphans = sorted({hour for (_t, _m, hour) in mirrored if hour not in closed})
     # A unique temp file beside the target, then a rename: an interrupted or concurrent export never leaves a torn file.
-    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path)))
+    fd, tmp = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path))
+    )
     try:
         with os.fdopen(fd, "w") as f:
             for (tenant, model, hour), (tokens_in, tokens_out, _events) in sorted(mirrored.items()):
-                f.write(json.dumps({"tenant_id": tenant, "model": model, "hour": hour.isoformat(),
-                                    "tokens_in": tokens_in, "tokens_out": tokens_out}) + "\n")
+                f.write(
+                    json.dumps(
+                        {
+                            "tenant_id": tenant,
+                            "model": model,
+                            "hour": hour.isoformat(),
+                            "tokens_in": tokens_in,
+                            "tokens_out": tokens_out,
+                        }
+                    )
+                    + "\n"
+                )
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -215,10 +245,16 @@ def export_actuals(conn, url: str, path: str) -> tuple[int, list[datetime]]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="python -m app.mirror", description="Recover or check the ClickHouse copy of the closed rollups.")
+    parser = argparse.ArgumentParser(
+        prog="python -m app.mirror", description="Recover or check the ClickHouse copy of the closed rollups."
+    )
     what = parser.add_mutually_exclusive_group(required=True)
-    what.add_argument("--backfill", action="store_true", help="copy every closed hour that is missing or different in ClickHouse")
-    what.add_argument("--export-actuals", metavar="FILE", help="write ClickHouse's totals as JSON lines for app.reconcile --actuals")
+    what.add_argument(
+        "--backfill", action="store_true", help="copy every closed hour that is missing or different in ClickHouse"
+    )
+    what.add_argument(
+        "--export-actuals", metavar="FILE", help="write ClickHouse's totals as JSON lines for app.reconcile --actuals"
+    )
     args = parser.parse_args(argv)
     url = clickhouse_url()
     if url is None:
@@ -242,9 +278,17 @@ def main(argv: list[str] | None = None) -> None:
             print(f"mirror: wrote {rows} rows to {args.export_actuals}", flush=True)
             if orphans:  # reconcile would skip these silently
                 hours = ", ".join(h.isoformat() for h in orphans)
-                print(f"mirror: ClickHouse has rows for hours not in closed_hours (reconcile skips them): {hours}", file=sys.stderr)
+                print(
+                    f"mirror: ClickHouse has rows for hours not in closed_hours (reconcile skips them): {hours}",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
-    except (RuntimeError, OSError, ValueError, http.client.HTTPException) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
+    except (
+        RuntimeError,
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+    ) as err:  # clickhouse unreachable or refused, or a bad CLICKHOUSE_URL: say so, non-zero
         print(f"mirror: {err}", file=sys.stderr)
         sys.exit(1)
 

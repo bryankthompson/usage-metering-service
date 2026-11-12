@@ -19,8 +19,12 @@ def client(conn):
 
 def event(**changes):
     base = {
-        "tenant_id": "tenant-1", "idempotency_key": "key-1", "model": "model-a",
-        "tokens_in": 10, "tokens_out": 5, "occurred_at": "2026-11-10T10:30:00Z",
+        "tenant_id": "tenant-1",
+        "idempotency_key": "key-1",
+        "model": "model-a",
+        "tokens_in": 10,
+        "tokens_out": 5,
+        "occurred_at": "2026-11-10T10:30:00Z",
     }
     return {**base, **changes}
 
@@ -57,12 +61,15 @@ def test_resend_with_same_instant_in_another_offset_is_a_duplicate(client, conn)
     assert count_events(conn) == 1
 
 
-@pytest.mark.parametrize("change", [
-    {"model": "model-b"},
-    {"tokens_in": 11},
-    {"tokens_out": 6},
-    {"occurred_at": "2026-11-10T10:30:01Z"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"model": "model-b"},
+        {"tokens_in": 11},
+        {"tokens_out": 6},
+        {"occurred_at": "2026-11-10T10:30:01Z"},
+    ],
+)
 def test_same_key_with_a_changed_payload_is_409_and_changes_nothing(client, conn, change):
     client.post("/v1/usage", json=event())
     r = client.post("/v1/usage", json=event(**change))
@@ -85,18 +92,21 @@ def test_tenant_mismatch_is_403_and_stores_nothing(client, conn):
     assert count_events(conn) == 0
 
 
-@pytest.mark.parametrize("change", [
-    {"occurred_at": "2026-11-10T10:30:00"},  # naive timestamp
-    {"tokens_in": -1},
-    {"tokens_out": -1},
-    {"tokens_in": 1.5},
-    {"tokens_in": 10**12 + 1},
-    {"tokens_out": 10**12 + 1},
-    {"tenant_id": ""},
-    {"idempotency_key": ""},
-    {"idempotency_key": "k" * 201},
-    {"model": ""},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"occurred_at": "2026-11-10T10:30:00"},  # naive timestamp
+        {"tokens_in": -1},
+        {"tokens_out": -1},
+        {"tokens_in": 1.5},
+        {"tokens_in": 10**12 + 1},
+        {"tokens_out": 10**12 + 1},
+        {"tenant_id": ""},
+        {"idempotency_key": ""},
+        {"idempotency_key": "k" * 201},
+        {"model": ""},
+    ],
+)
 def test_invalid_body_is_422_and_stores_nothing(client, conn, change):
     assert client.post("/v1/usage", json=event(**change)).status_code == 422
     assert count_events(conn) == 0
@@ -115,13 +125,16 @@ def close_hour(conn, hour_start):
     conn.commit()
 
 
-@pytest.mark.parametrize("occurred_at, late", [
-    ("2026-11-10T10:00:00Z", True),            # first instant of the closed hour
-    ("2026-11-10T10:59:59.999999Z", True),     # last instant of the closed hour
-    ("2026-11-10T11:00:00Z", False),           # next hour
-    ("2026-11-10T09:59:59.999999Z", False),    # previous hour
-    ("2026-11-10T15:45:00+05:30", True),       # 10:15 UTC: the hour is the UTC hour, not the local one
-])
+@pytest.mark.parametrize(
+    "occurred_at, late",
+    [
+        ("2026-11-10T10:00:00Z", True),  # first instant of the closed hour
+        ("2026-11-10T10:59:59.999999Z", True),  # last instant of the closed hour
+        ("2026-11-10T11:00:00Z", False),  # next hour
+        ("2026-11-10T09:59:59.999999Z", False),  # previous hour
+        ("2026-11-10T15:45:00+05:30", True),  # 10:15 UTC: the hour is the UTC hour, not the local one
+    ],
+)
 def test_event_in_a_closed_hour_is_stored_late(client, conn, occurred_at, late):
     close_hour(conn, "2026-11-10T10:00:00Z")
     r = client.post("/v1/usage", json=event(occurred_at=occurred_at))

@@ -7,6 +7,7 @@ Prices are per model and versioned: a new price is a new row, a stored version i
 (a database trigger enforces it). `price_at` picks the version in force at a given instant, so a
 charge for a past hour is rated with the price that applied then.
 """
+
 import base64
 import json
 import logging
@@ -45,8 +46,9 @@ def _require_int(value: object, name: str) -> None:
         raise TypeError(f"{name} must be an int of micro-USD, got {value!r}")
 
 
-def add_price_version(conn: psycopg.Connection, model: str, effective_from: datetime,
-                      input_micros_per_1k: int, output_micros_per_1k: int) -> int:
+def add_price_version(
+    conn: psycopg.Connection, model: str, effective_from: datetime, input_micros_per_1k: int, output_micros_per_1k: int
+) -> int:
     """Store the next version (1, 2, ...) for `model` and return its number. Commits.
 
     Two writers racing for the same number collide on the primary key and one raises; neither
@@ -59,10 +61,17 @@ def add_price_version(conn: psycopg.Connection, model: str, effective_from: date
         "INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
         " SELECT %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s FROM price_versions WHERE model = %s"
         " RETURNING version",
-        (model, effective_from, input_micros_per_1k, output_micros_per_1k, model)).fetchone()
+        (model, effective_from, input_micros_per_1k, output_micros_per_1k, model),
+    ).fetchone()
     conn.commit()
-    log.info("price version added: model=%r version=%s effective_from=%s in=%s out=%s",
-             model, row["version"], effective_from.isoformat(), input_micros_per_1k, output_micros_per_1k)
+    log.info(
+        "price version added: model=%r version=%s effective_from=%s in=%s out=%s",
+        model,
+        row["version"],
+        effective_from.isoformat(),
+        input_micros_per_1k,
+        output_micros_per_1k,
+    )
     return row["version"]
 
 
@@ -75,7 +84,8 @@ def price_at(conn: psycopg.Connection, model: str, at: datetime) -> dict:
     row = conn.execute(
         "SELECT version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
         " WHERE model = %s AND effective_from <= %s ORDER BY effective_from DESC, version DESC LIMIT 1",
-        (model, at)).fetchone()
+        (model, at),
+    ).fetchone()
     if row is None:
         raise NoPrice(f"no price for model {model!r} at {at.isoformat()}")
     return row
@@ -135,6 +145,7 @@ class ForeignCursor(Exception):
 
 class Cursor(NamedTuple):
     """Where a page stopped: the last line it held, and what the lines up to and including it counted and cost then."""
+
     hour_start: datetime
     model: str
     count_before: int
@@ -143,14 +154,14 @@ class Cursor(NamedTuple):
 
 class Page(NamedTuple):
     lines: list[dict]
-    total_micros: int           # the whole range, whatever the page
-    line_count: int             # the whole range
+    total_micros: int  # the whole range, whatever the page
+    line_count: int  # the whole range
     next_cursor: Cursor | None
 
 
-LINE_CAP = 10_000                # most lines in one body; a range with more is paged
+LINE_CAP = 10_000  # most lines in one body; a range with more is paged
 MAX_PAGE = LINE_CAP
-FETCH_ROWS = 1000                # rows the database sends per round trip of the pass
+FETCH_ROWS = 1000  # rows the database sends per round trip of the pass
 
 # `past` is decided by the database, with the column's collation: the same order as ORDER BY. Comparing `model` in Python would
 # order "Zebra" before "apple" where the database orders it after, and a page boundary would skip or repeat a line.
@@ -162,8 +173,16 @@ ORDER BY hour_start, model
 """
 
 
-def _charge_pass(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, *, after: Cursor | None,
-                 limit: int | None, max_rows: int | None) -> Page:
+def _charge_pass(
+    conn: psycopg.Connection,
+    tenant_id: str,
+    start: datetime,
+    end: datetime,
+    *,
+    after: Cursor | None,
+    limit: int | None,
+    max_rows: int | None,
+) -> Page:
     """One pass over every rollup row of the range, in constant memory (a server-side cursor), keeping only the page.
 
     Every row is rated, so the total, the line count and the unpriced check cover the whole range whatever the page. The rows
@@ -174,14 +193,19 @@ def _charge_pass(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
     _require_aware(start, "start")
     _require_aware(end, "end")
     deadline = time.monotonic() + db.REQUEST_STATEMENT_TIMEOUT_MS / 1000 if db.REQUEST_STATEMENT_TIMEOUT_MS else None
-    loaded: dict[str, list[dict]] = {}              # model -> its versions, read the first time the model shows up
+    loaded: dict[str, list[dict]] = {}  # model -> its versions, read the first time the model shows up
     keys: dict[str, list[datetime]] = {}
-    unpriced: dict[str, datetime] = {}              # model -> the first hour in range with no price (rows are in hour order)
+    unpriced: dict[str, datetime] = {}  # model -> the first hour in range with no price (rows are in hour order)
     page: list[dict] = []
     before_count = before_micros = line_count = total = 0
-    last: tuple[datetime, str] | None = None        # the last line kept on the page
-    params = {"tenant": tenant_id, "start": start, "end": end,
-              "after_hour": after.hour_start if after else None, "after_model": after.model if after else None}
+    last: tuple[datetime, str] | None = None  # the last line kept on the page
+    params = {
+        "tenant": tenant_id,
+        "start": start,
+        "end": end,
+        "after_hour": after.hour_start if after else None,
+        "after_model": after.model if after else None,
+    }
     with conn.cursor(name="charge_rows") as cursor:
         cursor.itersize = FETCH_ROWS
         cursor.execute(CHARGE_ROWS, params)
@@ -197,11 +221,15 @@ def _charge_pass(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
                 # A version effective at or after `end` can never apply to an hour in range, so it is not loaded.
                 loaded[model] = conn.execute(
                     "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
-                    " WHERE model = %s AND effective_from < %s ORDER BY effective_from, version", (model, end)).fetchall()
+                    " WHERE model = %s AND effective_from < %s ORDER BY effective_from, version",
+                    (model, end),
+                ).fetchall()
                 keys[model] = [v["effective_from"].astimezone(timezone.utc) for v in loaded[model]]
             version = _in_force(keys[model], loaded[model], row["hour_start"])
             if version is None:
-                unpriced.setdefault(model, row["hour_start"])    # keep going: name every unpriced model, not just the first
+                unpriced.setdefault(
+                    model, row["hour_start"]
+                )  # keep going: name every unpriced model, not just the first
                 continue
             micros = _rate(version, row["tokens_in"], row["tokens_out"])
             line_count += 1
@@ -210,25 +238,46 @@ def _charge_pass(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
                 before_count += 1
                 before_micros += micros
             elif limit is None or len(page) < limit:
-                page.append({"model": model, "hour_start": row["hour_start"], "tokens_in": row["tokens_in"],
-                             "tokens_out": row["tokens_out"], "price_version": version["version"], "micros": micros})
+                page.append(
+                    {
+                        "model": model,
+                        "hour_start": row["hour_start"],
+                        "tokens_in": row["tokens_in"],
+                        "tokens_out": row["tokens_out"],
+                        "price_version": version["version"],
+                        "micros": micros,
+                    }
+                )
                 last = (row["hour_start"], model)
-    if deadline is not None and time.monotonic() > deadline:     # the last row may have been the slow one
+    if deadline is not None and time.monotonic() > deadline:  # the last row may have been the slow one
         raise psycopg.errors.QueryCanceled("the charges pass ran past the statement timeout")
-    if unpriced:                                     # all or nothing: no partial bill, whichever page was asked for
+    if unpriced:  # all or nothing: no partial bill, whichever page was asked for
         raise NoPrice(_unpriced_message(unpriced))
     if after and (before_count, before_micros) != (after.count_before, after.micros_before):
-        raise RangeChanged(f"the {before_count} lines up to the cursor are not the {after.count_before} it was made from")
+        raise RangeChanged(
+            f"the {before_count} lines up to the cursor are not the {after.count_before} it was made from"
+        )
     kept = before_count + len(page)
-    next_cursor = Cursor(last[0], last[1], kept, before_micros + sum(line["micros"] for line in page)) \
-        if last and line_count > kept else None
-    log.info("charges computed: tenant=%r start=%s end=%s lines=%d kept=%d total_micros=%d",
-             tenant_id, start.isoformat(), end.isoformat(), line_count, len(page), total)
+    next_cursor = (
+        Cursor(last[0], last[1], kept, before_micros + sum(line["micros"] for line in page))
+        if last and line_count > kept
+        else None
+    )
+    log.info(
+        "charges computed: tenant=%r start=%s end=%s lines=%d kept=%d total_micros=%d",
+        tenant_id,
+        start.isoformat(),
+        end.isoformat(),
+        line_count,
+        len(page),
+        total,
+    )
     return Page(page, total, line_count, next_cursor)
 
 
-def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime,
-                 max_lines: int | None = None) -> tuple[list[dict], int]:
+def charge_lines(
+    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, max_lines: int | None = None
+) -> tuple[list[dict], int]:
     """Rate every hourly rollup row of the tenant with `start <= hour_start < end`, each at its own hour_start.
 
     Returns (lines, total_micros). Each line is rounded on its own (see `rate`) and the total is the
@@ -241,8 +290,9 @@ def charge_lines(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
     return page.lines, page.total_micros
 
 
-def charge_page(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, limit: int,
-                after: Cursor | None = None) -> Page:
+def charge_page(
+    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime, limit: int, after: Cursor | None = None
+) -> Page:
     """At most `limit` lines of the range, those after `after` (the start when None). The total and the line count are the
     whole range's, and a missing price anywhere in it raises NoPrice, as for `charge_lines`. A pass is made per page."""
     return _charge_pass(conn, tenant_id, start, end, after=after, limit=limit, max_rows=None)
@@ -250,8 +300,15 @@ def charge_page(conn: psycopg.Connection, tenant_id: str, start: datetime, end: 
 
 def encode_cursor(tenant_id: str, start: datetime, end: datetime, cursor: Cursor) -> str:
     """Opaque text for the client; not signed, it holds nothing secret and a change to it is caught by the counts."""
-    body = {"t": tenant_id, "s": _offset_text(start), "e": _offset_text(end), "h": _offset_text(cursor.hour_start), "m": cursor.model,
-            "n": cursor.count_before, "u": cursor.micros_before}
+    body = {
+        "t": tenant_id,
+        "s": _offset_text(start),
+        "e": _offset_text(end),
+        "h": _offset_text(cursor.hour_start),
+        "m": cursor.model,
+        "n": cursor.count_before,
+        "u": cursor.micros_before,
+    }
     return base64.urlsafe_b64encode(json.dumps(body, separators=(",", ":")).encode()).decode()
 
 
@@ -274,7 +331,11 @@ def decode_cursor(text: str, tenant_id: str, start: datetime, end: datetime) -> 
         body["m"].encode("utf-8")
         if not 1 <= len(body["m"]) <= MAX_TEXT or "\x00" in body["m"]:
             raise ValueError("bad model")
-    except (ValueError, TypeError, RecursionError) as err:  # binascii.Error, UnicodeError, JSONDecodeError are ValueErrors; deep nesting is RecursionError
+    except (
+        ValueError,
+        TypeError,
+        RecursionError,
+    ) as err:  # binascii.Error, UnicodeError, JSONDecodeError are ValueErrors; deep nesting is RecursionError
         raise ValueError("malformed cursor") from err
     if (body["t"], times[0], times[1]) != (tenant_id, start, end):
         raise ForeignCursor("foreign cursor: it was made for another tenant or range")
@@ -296,7 +357,7 @@ def _offset_text(value: datetime) -> str:
     return value.isoformat()
 
 
-MAX_RANGE = timedelta(days=366)           # a wider range is refused: ask for the period in pieces
+MAX_RANGE = timedelta(days=366)  # a wider range is refused: ask for the period in pieces
 UNCLOSED_LIMIT = 100
 
 # Hours that start inside the range and hold usage that is not late, but are not in closed_hours: usage the bill does not
@@ -312,7 +373,9 @@ ORDER BY hour_start LIMIT %(limit)s
 """
 
 
-def unclosed_hours(conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime) -> tuple[list[datetime], bool]:
+def unclosed_hours(
+    conn: psycopg.Connection, tenant_id: str, start: datetime, end: datetime
+) -> tuple[list[datetime], bool]:
     """The earliest UNCLOSED_LIMIT hours in [start, end) that hold usage the charges do not include yet, and whether there
     were more (the list is cut there, so the flag is how a caller knows)."""
     rows = conn.execute(UNCLOSED_HOURS, {"tenant": tenant_id, "start": start, "end": end, "limit": UNCLOSED_LIMIT + 1})
@@ -327,7 +390,9 @@ def _iso_text(value: object) -> object:
     """Only ISO 8601 text: a bare number is read as Unix seconds by the datetime parser (`?start=5` is 1970), and a
     caller who sends one almost certainly meant something else. Every spelling that starts YYYY-MM-DD passes unchanged."""
     if not isinstance(value, str) or not ISO_DATE.match(value):
-        raise PydanticCustomError("iso_datetime", "must be ISO 8601 text with a time zone, such as 2026-11-01T00:00:00Z")
+        raise PydanticCustomError(
+            "iso_datetime", "must be ISO 8601 text with a time zone, such as 2026-11-01T00:00:00Z"
+        )
     return value
 
 
@@ -335,9 +400,14 @@ IsoDatetime = Annotated[datetime, BeforeValidator(_iso_text)]
 
 
 @router.get("/v1/tenants/{tenant_id}/charges")
-def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime, limit: int | None = Query(None, ge=1, le=MAX_PAGE),
-                cursor: str | None = Query(None, max_length=CURSOR_MAX_LENGTH),
-                caller: str = Depends(require_entitlement)) -> dict:
+def get_charges(
+    tenant_id: str,
+    start: IsoDatetime,
+    end: IsoDatetime,
+    limit: int | None = Query(None, ge=1, le=MAX_PAGE),
+    cursor: str | None = Query(None, max_length=CURSOR_MAX_LENGTH),
+    caller: str = Depends(require_entitlement),
+) -> dict:
     if caller != tenant_id:
         raise HTTPException(status_code=403, detail="tenant does not match the caller")
     for name, value in (("start", start), ("end", end)):
@@ -346,7 +416,9 @@ def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime, limit: int
     if start >= end:
         raise HTTPException(status_code=422, detail="start must be before end")
     if end - start > MAX_RANGE:
-        raise HTTPException(status_code=422, detail=f"the range is wider than {MAX_RANGE.days} days: ask for the period in pieces")
+        raise HTTPException(
+            status_code=422, detail=f"the range is wider than {MAX_RANGE.days} days: ask for the period in pieces"
+        )
     after = None
     if cursor is not None:
         if limit is None:
@@ -371,14 +443,27 @@ def get_charges(tenant_id: str, start: IsoDatetime, end: IsoDatetime, limit: int
             log.error("charges refused: %s", err)
             raise HTTPException(status_code=409, detail=str(err)) from err
         except TooManyLines as err:
-            raise HTTPException(status_code=422, detail=f"{err}: page with limit (at most {MAX_PAGE}), then cursor") from err
+            raise HTTPException(
+                status_code=422, detail=f"{err}: page with limit (at most {MAX_PAGE}), then cursor"
+            ) from err
         except RangeChanged as err:
             log.warning("charges refused: range changed under cursor: %s", err)
             raise HTTPException(status_code=409, detail=f"range changed, restart: {err}") from err
     if unclosed:
-        log.info("charges partial: tenant=%r %d hour(s) with usage are not closed yet, first %s", tenant_id, len(unclosed),
-                 unclosed[0].isoformat())
-    return {"tenant_id": tenant_id, "start": start, "end": end, "lines": page.lines, "total_micros": page.total_micros,
-            "line_count": page.line_count,
-            "next_cursor": encode_cursor(tenant_id, start, end, page.next_cursor) if page.next_cursor else None,
-            "unclosed_hours": unclosed, "unclosed_hours_truncated": unclosed_cut}
+        log.info(
+            "charges partial: tenant=%r %d hour(s) with usage are not closed yet, first %s",
+            tenant_id,
+            len(unclosed),
+            unclosed[0].isoformat(),
+        )
+    return {
+        "tenant_id": tenant_id,
+        "start": start,
+        "end": end,
+        "lines": page.lines,
+        "total_micros": page.total_micros,
+        "line_count": page.line_count,
+        "next_cursor": encode_cursor(tenant_id, start, end, page.next_cursor) if page.next_cursor else None,
+        "unclosed_hours": unclosed,
+        "unclosed_hours_truncated": unclosed_cut,
+    }

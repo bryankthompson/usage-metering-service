@@ -3,11 +3,11 @@
 For a reader who has written Python for about a year. Each item says what the feature is, where it is used here, and what
 would break without it. Line numbers are for the tree this was written on; `grep -n` the quoted text if they have moved.
 
-## 1. A decorator: `@app.get("/healthz")` (`app/main.py:59`)
+## 1. A decorator: `@app.get("/healthz")` (`healthz` in `create_app`, `app/main.py`)
 A decorator is a function that takes the function written under it and registers or wraps it. This one tells FastAPI
 "answer GET /healthz by calling `healthz`", and gives the function back unchanged.
 Without it, `healthz` is an ordinary function nobody calls, and `GET /healthz` answers 404.
-The routes `@router.post("/v1/usage")` (`ingest_usage` in `app/ingest.py`) and `@router.post("/v1/stripe/webhook")` (`app/webhooks.py:228`)
+The routes `@router.post("/v1/usage")` (`ingest_usage` in `app/ingest.py`) and `@router.post("/v1/stripe/webhook")` (`stripe_webhook` in `app/webhooks.py`)
 work the same way; `app.include_router(...)` in `main.py` is what attaches them to the app.
 
 ## 2. A context manager: `with request_connection() as conn:` (`require_entitlement` in `app/edge.py`)
@@ -38,4 +38,4 @@ Without the star, the tuple is `(hour, (rows, events))`. The loop in `run_once` 
 would then raise `ValueError: not enough values to unpack (expected 3, got 2)`.
 The same idea with two stars merges dicts: `{"a": f, **{name: g for name in names}}` in the `HANDLERS` table (`app/webhooks.py`).
 
-Also worth reading: `app/bodylimit.py`, a small ASGI middleware (a class with `__call__` that wraps the app, added at `app/main.py:37`) that answers 413 for a `/v1/usage` body over 64 KiB before FastAPI reads it.
+Also worth reading: `app/bodylimit.py`, a small ASGI middleware (a class with `__call__` that wraps the app, added by `create_app` in `app/main.py`) that answers 413 for a `/v1/usage` body over 64 KiB before FastAPI reads it.

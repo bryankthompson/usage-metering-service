@@ -1,5 +1,6 @@
 """A charges range with an unpriced model is still a 409 (no partial bills), but the detail names EVERY unpriced model in
 the range, with the first hour of each, so the operator can add all the missing prices in one pass (RT-money-3)."""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -28,7 +29,9 @@ def usage(conn, model: str, *hours: int):
     for h in hours:
         conn.execute(
             "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-            " VALUES ('tenant-1', %s, %s, 1000, 1000, 1)", (model, T0 + timedelta(hours=h)))
+            " VALUES ('tenant-1', %s, %s, 1000, 1000, 1)",
+            (model, T0 + timedelta(hours=h)),
+        )
     conn.commit()
 
 
@@ -48,13 +51,14 @@ def test_every_unpriced_model_is_named_sorted_with_its_first_hour(client, conn):
     add_price_version(conn, "good", T0, 1000, 1000)
     add_price_version(conn, "priced-later", T0 + timedelta(hours=2), 1000, 1000)
     usage(conn, "good", 0, 1, 2)
-    usage(conn, "b-model", 1, 2)                 # never priced, first seen at hour 1
-    usage(conn, "a-model", 0, 1, 2)              # never priced, first seen at hour 0
-    usage(conn, "priced-later", 0, 1, 2)         # unpriced for hours 0 and 1, priced from hour 2
+    usage(conn, "b-model", 1, 2)  # never priced, first seen at hour 1
+    usage(conn, "a-model", 0, 1, 2)  # never priced, first seen at hour 0
+    usage(conn, "priced-later", 0, 1, 2)  # unpriced for hours 0 and 1, priced from hour 2
     r = charges(client)
     assert r.status_code == 409
-    assert r.json() == {"detail": f"no price for 3 models: 'a-model' at {iso(0)}, 'b-model' at {iso(1)}, "
-                                  f"'priced-later' at {iso(0)}"}
+    assert r.json() == {
+        "detail": f"no price for 3 models: 'a-model' at {iso(0)}, 'b-model' at {iso(1)}, " f"'priced-later' at {iso(0)}"
+    }
 
 
 def test_a_priced_model_is_never_named(client, conn):
@@ -100,7 +104,7 @@ def test_it_is_still_all_or_nothing_no_partial_bill(client, conn):
 def test_an_unpriced_model_outside_the_range_is_not_named_and_does_not_block(client, conn):
     add_price_version(conn, "good", T0, 1000, 1000)
     usage(conn, "good", 0)
-    usage(conn, "bad", 5)                                                     # hour 5 is past the range end (hour 3)
+    usage(conn, "bad", 5)  # hour 5 is past the range end (hour 3)
     r = charges(client)
     assert r.status_code == 200 and r.json()["total_micros"] == 2000
 

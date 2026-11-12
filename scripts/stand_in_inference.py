@@ -8,6 +8,7 @@ Standard library only.
 
     python3 scripts/stand_in_inference.py [--port 8089] [--seed 1]
 """
+
 import argparse
 import json
 import random
@@ -33,20 +34,33 @@ class Replies:
             self.count += 1
             tokens_in, tokens_out = self.rng.randint(20, 2000), self.rng.randint(1, 800)
             reply_id = f"chatcmpl-standin-{self.count:06d}"
-        return {"id": reply_id, "object": "chat.completion", "created": int(time.time()), "model": model,
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Stand-in reply."},
-                             "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": tokens_in, "completion_tokens": tokens_out,
-                          "total_tokens": tokens_in + tokens_out}}
+        return {
+            "id": reply_id,
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "Stand-in reply."}, "finish_reason": "stop"}
+            ],
+            "usage": {
+                "prompt_tokens": tokens_in,
+                "completion_tokens": tokens_out,
+                "total_tokens": tokens_in + tokens_out,
+            },
+        }
 
-    def embeddings(self) -> dict:   # like the real shape, no `model` and no `choices`
+    def embeddings(self) -> dict:  # like the real shape, no `model` and no `choices`
         with self.lock:
             self.count += 1
             tokens_in = self.rng.randint(5, 1500)
             reply_id = f"emb-standin-{self.count:06d}"
-        return {"id": reply_id, "object": "list", "created": int(time.time()),
-                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
-                "usage": {"prompt_tokens": tokens_in, "completion_tokens": 0, "total_tokens": tokens_in}}
+        return {
+            "id": reply_id,
+            "object": "list",
+            "created": int(time.time()),
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+            "usage": {"prompt_tokens": tokens_in, "completion_tokens": 0, "total_tokens": tokens_in},
+        }
 
 
 def make_server(port: int, seed: int) -> ThreadingHTTPServer:

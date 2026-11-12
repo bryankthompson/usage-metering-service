@@ -1,5 +1,6 @@
 """The ClickHouse mirror is off the rollup's critical path: `close_due_hours` closes every due hour first and mirrors
 them in one pass after the loop, a down ClickHouse is paid for once per pass, and `backfill` groups rows once by hour."""
+
 import logging
 import urllib.error
 from datetime import datetime, timedelta, timezone
@@ -44,21 +45,26 @@ def test_every_hour_is_closed_before_the_first_mirror_call_and_all_are_mirrored(
     monkeypatch.setattr(mirror, "write_rows", calls)
     closed = close_due_hours(conn, NOW)
     assert [h for h, _, _ in closed] == HOURS
-    assert [h for h, _ in calls.calls] == HOURS                      # oldest first, each once
-    assert {n for _, n in calls.calls} == {5}                        # all 5 commits happened before the first mirror call
+    assert [h for h, _ in calls.calls] == HOURS  # oldest first, each once
+    assert {n for _, n in calls.calls} == {5}  # all 5 commits happened before the first mirror call
     assert [r["tokens_in"] for h in HOURS for r in calls.sent[h]] == [h.hour for h in HOURS]
 
 
-def test_a_mirror_that_is_down_is_tried_once_and_the_other_hours_are_logged_skipped(conn, url, five_hours, monkeypatch, caplog):
+def test_a_mirror_that_is_down_is_tried_once_and_the_other_hours_are_logged_skipped(
+    conn, url, five_hours, monkeypatch, caplog
+):
     calls = Calls(conn, fail={h: urllib.error.URLError("refused") for h in HOURS})
     monkeypatch.setattr(mirror, "write_rows", calls)
     with caplog.at_level(logging.ERROR):
         closed = close_due_hours(conn, NOW)
     assert len(closed) == 5 and closed_hours(conn) == HOURS and len(rollups(conn)) == 5
-    assert calls.calls == [(HOURS[0], 5)]                            # one attempt
+    assert calls.calls == [(HOURS[0], 5)]  # one attempt
     assert f"clickhouse mirror failed: hour={HOURS[0].isoformat()}" in caplog.text
     for h in HOURS[1:]:
-        assert caplog.text.count(f"clickhouse mirror skipped: hour={h.isoformat()} after an earlier failure in this pass") == 1
+        assert (
+            caplog.text.count(f"clickhouse mirror skipped: hour={h.isoformat()} after an earlier failure in this pass")
+            == 1
+        )
     assert "skipped: hour=" + HOURS[0].isoformat() not in caplog.text
 
 
@@ -67,7 +73,7 @@ def test_a_timeout_or_oserror_also_skips_the_rest(conn, url, five_hours, monkeyp
     calls = Calls(conn, fail={HOURS[1]: err})
     monkeypatch.setattr(mirror, "write_rows", calls)
     close_due_hours(conn, NOW)
-    assert [h for h, _ in calls.calls] == HOURS[:2]                  # hour 1 ok, hour 2 fails, hours 3-5 skipped
+    assert [h for h, _ in calls.calls] == HOURS[:2]  # hour 1 ok, hour 2 fails, hours 3-5 skipped
 
 
 def test_an_http_error_for_one_hour_does_not_stop_the_others(conn, url, five_hours, monkeypatch, caplog):
@@ -76,7 +82,7 @@ def test_an_http_error_for_one_hour_does_not_stop_the_others(conn, url, five_hou
     with caplog.at_level(logging.ERROR):
         closed = close_due_hours(conn, NOW)
     assert len(closed) == 5
-    assert [h for h, _ in calls.calls] == HOURS                      # all five tried
+    assert [h for h, _ in calls.calls] == HOURS  # all five tried
     assert set(calls.sent) == set(HOURS) - {HOURS[1]}
     assert "skipped" not in caplog.text and f"mirror failed: hour={HOURS[1].isoformat()}" in caplog.text
 
@@ -129,7 +135,7 @@ def test_a_direct_close_hour_still_mirrors_after_its_commit(conn, url, five_hour
     calls = Calls(conn)
     monkeypatch.setattr(mirror, "write_rows", calls)
     assert close_hour(conn, HOURS[0]) == (1, 1)
-    assert calls.calls == [(HOURS[0], 1)]                            # the commit was already there
+    assert calls.calls == [(HOURS[0], 1)]  # the commit was already there
 
 
 def test_run_once_output_is_the_same_with_the_mirror_down(conn, url, five_hours, monkeypatch, capsys):
@@ -141,6 +147,7 @@ def test_run_once_output_is_the_same_with_the_mirror_down(conn, url, five_hours,
 
 
 # ---- P1-11: backfill groups once ----
+
 
 def old_backfill(rows, mirrored):
     """The grouping of backfill on main (e1baa59), as the oracle: the hours it would send, with the rows of each."""
@@ -173,14 +180,21 @@ def generated(n_hours, per_hour):
     for i in range(n_hours):
         hour = (base + timedelta(hours=i)).astimezone(offsets[i % 3])
         for j in range(per_hour):
-            row = {"tenant_id": f"t{j}", "model": "m", "hour_start": hour, "tokens_in": i, "tokens_out": j, "event_count": 1}
+            row = {
+                "tenant_id": f"t{j}",
+                "model": "m",
+                "hour_start": hour,
+                "tokens_in": i,
+                "tokens_out": j,
+                "event_count": 1,
+            }
             rows.append(row)
-            if i % 4 != 0:                                           # every 4th hour missing in the mirror
+            if i % 4 != 0:  # every 4th hour missing in the mirror
                 values = mirror._row_values(row)
                 if i % 4 == 1 and j == 0:
-                    values = (values[0] + 1, values[1], values[2])   # one row different
+                    values = (values[0] + 1, values[1], values[2])  # one row different
                 mirrored[mirror._row_key(row)] = values
-    mirrored[("tx", "m", base - timedelta(hours=1))] = (1, 1, 1)     # ClickHouse-only row
+    mirrored[("tx", "m", base - timedelta(hours=1))] = (1, 1, 1)  # ClickHouse-only row
     return rows, mirrored
 
 
@@ -196,7 +210,7 @@ def test_new_backfill_sends_what_the_old_grouping_sent(monkeypatch):
     rows, mirrored = generated(40, 3)
     result, sent = run_new(monkeypatch, rows, mirrored)
     expected = old_backfill(rows, mirrored)
-    assert len(expected) == 20                                       # 10 missing hours, 10 with one row different, 20 identical
+    assert len(expected) == 20  # 10 missing hours, 10 with one row different, 20 identical
     assert result == (len(expected), [])
     assert [(mirror._utc(r[0]["hour_start"]), r) for r in sent] == expected
 
@@ -226,7 +240,7 @@ def test_backfill_work_is_linear_in_rows(monkeypatch):
     monkeypatch.setattr(mirror, "_utc", counting)
     result, sent = run_new(monkeypatch, rows, mirrored)
     assert result[0] == len(sent) and result[0] > 0
-    assert calls < 5 * len(rows)                                     # old code: ~ hours x rows = 5000 x 100,000
+    assert calls < 5 * len(rows)  # old code: ~ hours x rows = 5000 x 100,000
 
 
 def _record_mirror_hours(monkeypatch):
@@ -239,7 +253,7 @@ def test_with_the_mirror_off_no_closed_hour_is_held_for_the_mirror_pass(conn, fi
     monkeypatch.delenv("CLICKHOUSE_URL", raising=False)
     seen = _record_mirror_hours(monkeypatch)
     assert len(close_due_hours(conn, NOW)) == 5
-    assert seen == [[]]                                              # nothing kept in memory for a pass that does nothing
+    assert seen == [[]]  # nothing kept in memory for a pass that does nothing
 
 
 def test_with_the_mirror_on_every_closed_hour_is_held_in_order(conn, url, five_hours, monkeypatch):

@@ -3,6 +3,7 @@
 The oracle is a frozen copy of `charge_lines` as it was before paging: pages put together must equal its lines and its total, and
 it must refuse (NoPrice) in the same cases. See docs/billing.md, "Paging".
 """
+
 import base64
 import json
 import math
@@ -36,16 +37,20 @@ def old_charge_lines(conn, tenant_id, start, end):
     rows = conn.execute(
         "SELECT model, hour_start, tokens_in, tokens_out FROM usage_rollups_hourly"
         " WHERE tenant_id = %s AND hour_start >= %s AND hour_start < %s ORDER BY hour_start, model",
-        (tenant_id, start, end)).fetchall()
+        (tenant_id, start, end),
+    ).fetchall()
     models = sorted({row["model"] for row in rows})
     loaded = {model: [] for model in models}
     if models:
         for v in conn.execute(
-                "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
-                " WHERE model = ANY(%s) AND effective_from <= %s ORDER BY effective_from, version",
-                (models, rows[-1]["hour_start"])):
+            "SELECT model, version, effective_from, input_micros_per_1k, output_micros_per_1k FROM price_versions"
+            " WHERE model = ANY(%s) AND effective_from <= %s ORDER BY effective_from, version",
+            (models, rows[-1]["hour_start"]),
+        ):
             loaded[v["model"]].append(v)
-    keys = {model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()}
+    keys = {
+        model: [v["effective_from"].astimezone(timezone.utc) for v in versions] for model, versions in loaded.items()
+    }
     lines = []
     unpriced = {}
     for row in rows:
@@ -53,9 +58,16 @@ def old_charge_lines(conn, tenant_id, start, end):
         if version is None:
             unpriced.setdefault(row["model"], row["hour_start"])
             continue
-        lines.append({"model": row["model"], "hour_start": row["hour_start"], "tokens_in": row["tokens_in"],
-                      "tokens_out": row["tokens_out"], "price_version": version["version"],
-                      "micros": pricing._rate(version, row["tokens_in"], row["tokens_out"])})
+        lines.append(
+            {
+                "model": row["model"],
+                "hour_start": row["hour_start"],
+                "tokens_in": row["tokens_in"],
+                "tokens_out": row["tokens_out"],
+                "price_version": version["version"],
+                "micros": pricing._rate(version, row["tokens_in"], row["tokens_out"]),
+            }
+        )
     if unpriced:
         raise NoPrice(pricing._unpriced_message(unpriced))
     return lines, sum(line["micros"] for line in lines)
@@ -64,7 +76,9 @@ def old_charge_lines(conn, tenant_id, start, end):
 def rollup(conn, model, hour, tokens_in=1000, tokens_out=500, tenant="tenant-1"):
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-        " VALUES (%s, %s, %s, %s, %s, 1)", (tenant, model, hour, tokens_in, tokens_out))
+        " VALUES (%s, %s, %s, %s, %s, 1)",
+        (tenant, model, hour, tokens_in, tokens_out),
+    )
     conn.commit()
 
 
@@ -104,11 +118,11 @@ def rich(conn):
         add_price_version(conn, model, T0 + 5 * HOUR, 1500 + i, 100 + i)
     for h in range(12):
         for i, model in enumerate(MODELS):
-            if (h + i) % 3:                                         # not every model in every hour
+            if (h + i) % 3:  # not every model in every hour
                 rollup(conn, model, T0 + h * HOUR, 100 * h + i + 1, 37 * i + h)
     rollup(conn, "Zebra", T0 + 2 * HOUR, 5, 5, tenant="tenant-2")
-    rollup(conn, "Zebra", T0 + 12 * HOUR, 999, 999)                 # exactly at `end`: not in the range
-    rollup(conn, "Zebra", T0 - HOUR, 999, 999)                      # just before `start`
+    rollup(conn, "Zebra", T0 + 12 * HOUR, 999, 999)  # exactly at `end`: not in the range
+    rollup(conn, "Zebra", T0 - HOUR, 999, 999)  # just before `start`
     return span(12)
 
 
@@ -121,7 +135,7 @@ def test_pages_put_together_equal_the_unpaged_charge_lines(client, conn, rich, l
     assert as_oracle(lines) == want_lines
     assert len(pages) == math.ceil(len(want_lines) / limit)
     for page in pages:
-        assert page["total_micros"] == want_total                   # the whole range on every page, not the page's share
+        assert page["total_micros"] == want_total  # the whole range on every page, not the page's share
         assert page["line_count"] == len(want_lines)
         assert len(page["lines"]) <= limit
     assert sum(line["micros"] for line in lines) == want_total
@@ -141,12 +155,17 @@ def test_mixed_case_models_page_in_the_database_order_across_a_page_boundary(cli
         add_price_version(conn, model, T0 - HOUR, 1000, 1000)
         rollup(conn, model, T0)
         rollup(conn, model, T0 + HOUR)
-    in_database_order = [r["model"] for r in conn.execute(
-        "SELECT model FROM usage_rollups_hourly WHERE hour_start = %s ORDER BY model", (T0,))]
-    assert in_database_order != sorted(in_database_order)           # the test only means something if Python would order them differently
+    in_database_order = [
+        r["model"]
+        for r in conn.execute("SELECT model FROM usage_rollups_hourly WHERE hour_start = %s ORDER BY model", (T0,))
+    ]
+    assert in_database_order != sorted(
+        in_database_order
+    )  # the test only means something if Python would order them differently
     lines, _ = walk(client, span(2), 1)
     assert [(l["hour_start"], l["model"]) for l in lines] == [
-        (h.isoformat().replace("+00:00", "Z"), m) for h in (T0, T0 + HOUR) for m in in_database_order]
+        (h.isoformat().replace("+00:00", "Z"), m) for h in (T0, T0 + HOUR) for m in in_database_order
+    ]
 
 
 def test_an_empty_range_is_one_empty_page(client, conn):
@@ -164,17 +183,17 @@ def test_one_line_is_one_page(client, conn):
 
 def test_a_range_with_rows_only_at_its_edges(client, conn):
     add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
-    rollup(conn, "m1", T0)                                          # start is included
-    rollup(conn, "m1", T0 + 3 * HOUR)                               # end is excluded
+    rollup(conn, "m1", T0)  # start is included
+    rollup(conn, "m1", T0 + 3 * HOUR)  # end is excluded
     lines, pages = walk(client, span(3), 1)
     assert [l["hour_start"] for l in lines] == ["2026-11-01T00:00:00Z"] and len(pages) == 1
 
 
 def test_prices_dated_inside_the_range_apply_and_one_dated_at_or_after_the_end_does_not(client, conn):
     add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
-    add_price_version(conn, "m1", T0 + 2 * HOUR, 3000, 3000)         # inside the range: applies from hour 2
-    add_price_version(conn, "m1", T0 + 4 * HOUR, 9000, 9000)         # exactly at `end`: can apply to no hour of the range
-    add_price_version(conn, "m1", T0 + 9 * HOUR, 9000, 9000)         # after `end`
+    add_price_version(conn, "m1", T0 + 2 * HOUR, 3000, 3000)  # inside the range: applies from hour 2
+    add_price_version(conn, "m1", T0 + 4 * HOUR, 9000, 9000)  # exactly at `end`: can apply to no hour of the range
+    add_price_version(conn, "m1", T0 + 9 * HOUR, 9000, 9000)  # after `end`
     for h in range(4):
         rollup(conn, "m1", T0 + h * HOUR)
     want, total = old_charge_lines(conn, "tenant-1", T0, T0 + 4 * HOUR)
@@ -207,6 +226,7 @@ def test_a_price_missing_after_page_one_is_a_409_on_page_two_and_never_a_short_b
 
 # --- the contract ---------------------------------------------------------------------------------------------------------
 
+
 def test_without_limit_a_range_over_the_cap_is_422_and_never_a_short_200(client, conn, monkeypatch):
     add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
     for h in range(6):
@@ -214,7 +234,7 @@ def test_without_limit_a_range_over_the_cap_is_422_and_never_a_short_200(client,
     monkeypatch.setattr(pricing, "LINE_CAP", 5)
     resp = client.get(PATH, params=span(6))
     assert resp.status_code == 422 and "page with limit" in resp.json()["detail"]
-    assert client.get(PATH, params=span(5)).json()["line_count"] == 5     # exactly the cap is still a whole body
+    assert client.get(PATH, params=span(5)).json()["line_count"] == 5  # exactly the cap is still a whole body
     assert client.get(PATH, params={**span(6), "limit": 5}).status_code == 200
 
 
@@ -237,7 +257,15 @@ def test_a_cursor_without_a_limit_is_422(client, conn):
 
 def make_cursor(**fields):
     """A cursor as JSON in base64; json.dumps keeps a lone surrogate as an escape, so the text stays ASCII."""
-    body = {"t": "tenant-1", "s": T0.isoformat(), "e": (T0 + 3 * HOUR).isoformat(), "h": T0.isoformat(), "m": "m1", "n": 1, "u": 2000}
+    body = {
+        "t": "tenant-1",
+        "s": T0.isoformat(),
+        "e": (T0 + 3 * HOUR).isoformat(),
+        "h": T0.isoformat(),
+        "m": "m1",
+        "n": 1,
+        "u": 2000,
+    }
     body.update(fields)
     return base64.b64encode(json.dumps(body).encode()).decode()
 
@@ -270,30 +298,33 @@ def _flip(cursor):
     return cursor[:-6] + ("A" if cursor[-6] != "A" else "B") + cursor[-5:]
 
 
-@pytest.mark.parametrize("token", [
-    pytest.param("", id="empty"),
-    pytest.param("not base64!!", id="not base64"),
-    pytest.param("日本語", id="non-ascii"),
-    pytest.param(base64.b64encode(b"not json").decode(), id="not json"),
-    pytest.param(base64.b64encode(b"[1, 2]").decode(), id="not an object"),
-    pytest.param(base64.b64encode(b"{}").decode(), id="no fields"),
-    pytest.param(make_cursor(n=True), id="bool count"),
-    pytest.param(make_cursor(n=-1), id="negative count"),
-    pytest.param(make_cursor(n="1"), id="text count"),
-    pytest.param(make_cursor(u=1.5), id="float micros"),
-    pytest.param(make_cursor(m=5), id="model not text"),
-    pytest.param(make_cursor(h="yesterday"), id="hour not a date"),
-    pytest.param(make_cursor(h="2026-11-01T00:00:00"), id="hour without a zone"),
-    pytest.param(make_cursor(x=1), id="extra field"),
-    pytest.param(make_cursor(m="a\x00b"), id="NUL in the model"),
-    pytest.param(make_cursor(m="a\ud800b"), id="lone surrogate in the model"),
-    pytest.param(make_cursor(m=""), id="empty model"),
-    pytest.param(make_cursor(m="x" * 201), id="model over the ingest limit"),
-    pytest.param(make_cursor(h=(T0 + 3 * HOUR).isoformat()), id="hour at the end of the range"),
-    pytest.param(make_cursor(h=(T0 - HOUR).isoformat()), id="hour before the range"),
-    pytest.param(make_cursor(h="0001-01-01T00:00:00+14:00"), id="hour in year one"),
-    pytest.param("A" * 5000, id="too long"),
-])
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("not base64!!", id="not base64"),
+        pytest.param("日本語", id="non-ascii"),
+        pytest.param(base64.b64encode(b"not json").decode(), id="not json"),
+        pytest.param(base64.b64encode(b"[1, 2]").decode(), id="not an object"),
+        pytest.param(base64.b64encode(b"{}").decode(), id="no fields"),
+        pytest.param(make_cursor(n=True), id="bool count"),
+        pytest.param(make_cursor(n=-1), id="negative count"),
+        pytest.param(make_cursor(n="1"), id="text count"),
+        pytest.param(make_cursor(u=1.5), id="float micros"),
+        pytest.param(make_cursor(m=5), id="model not text"),
+        pytest.param(make_cursor(h="yesterday"), id="hour not a date"),
+        pytest.param(make_cursor(h="2026-11-01T00:00:00"), id="hour without a zone"),
+        pytest.param(make_cursor(x=1), id="extra field"),
+        pytest.param(make_cursor(m="a\x00b"), id="NUL in the model"),
+        pytest.param(make_cursor(m="a\ud800b"), id="lone surrogate in the model"),
+        pytest.param(make_cursor(m=""), id="empty model"),
+        pytest.param(make_cursor(m="x" * 201), id="model over the ingest limit"),
+        pytest.param(make_cursor(h=(T0 + 3 * HOUR).isoformat()), id="hour at the end of the range"),
+        pytest.param(make_cursor(h=(T0 - HOUR).isoformat()), id="hour before the range"),
+        pytest.param(make_cursor(h="0001-01-01T00:00:00+14:00"), id="hour in year one"),
+        pytest.param("A" * 5000, id="too long"),
+    ],
+)
 def test_a_malformed_cursor_is_422(client, conn, three_hours, token):
     resp = client.get(PATH, params={**span(3), "limit": 1, "cursor": token})
     assert resp.status_code == 422
@@ -327,14 +358,14 @@ def test_an_hour_closed_out_of_order_behind_the_cursor_is_409_range_changed(clie
     for h in (2, 3, 4):
         rollup(conn, "m1", T0 + h * HOUR)
     first = client.get(PATH, params={**span(6), "limit": 2}).json()
-    rollup(conn, "m1", T0 + HOUR)                                   # an earlier hour closes late, behind the cursor
+    rollup(conn, "m1", T0 + HOUR)  # an earlier hour closes late, behind the cursor
     resp = client.get(PATH, params={**span(6), "limit": 2, "cursor": first["next_cursor"]})
     assert resp.status_code == 409 and "range changed, restart" in resp.json()["detail"]
 
 
 def test_a_price_backdated_behind_the_cursor_is_409_range_changed(client, conn, three_hours):
     first = page_one(client)
-    add_price_version(conn, "m1", T0, 5000, 5000)                   # applies from hour 0 on: line 1 is no longer what the client holds
+    add_price_version(conn, "m1", T0, 5000, 5000)  # applies from hour 0 on: line 1 is no longer what the client holds
     resp = client.get(PATH, params={**span(3), "limit": 1, "cursor": first["next_cursor"]})
     assert resp.status_code == 409 and "range changed, restart" in resp.json()["detail"]
 
@@ -344,13 +375,15 @@ def test_an_hour_closed_after_the_cursor_is_a_page_the_client_rule_still_checks(
     for h in (0, 1):
         rollup(conn, "m1", T0 + h * HOUR)
     first = client.get(PATH, params={**span(6), "limit": 1}).json()
-    rollup(conn, "m1", T0 + 3 * HOUR)                               # ahead of the cursor: nothing the client holds changes
+    rollup(conn, "m1", T0 + 3 * HOUR)  # ahead of the cursor: nothing the client holds changes
     lines, last = list(first["lines"]), first
     while last["next_cursor"]:
         last = client.get(PATH, params={**span(6), "limit": 1, "cursor": last["next_cursor"]}).json()
         lines += last["lines"]
     assert len(lines) == last["line_count"] == 3
-    assert sum(l["micros"] for l in lines) == last["total_micros"]  # the client rule holds; page one's total (2000) was stale
+    assert (
+        sum(l["micros"] for l in lines) == last["total_micros"]
+    )  # the client rule holds; page one's total (2000) was stale
 
 
 def test_an_unpaged_and_a_paged_walk_of_a_big_page_agree(client, conn):
@@ -364,11 +397,13 @@ def test_an_unpaged_and_a_paged_walk_of_a_big_page_agree(client, conn):
 
 # --- unclosed hours: the cap says so ----------------------------------------------------------------------------------------
 
+
 def events(conn, count):
     conn.execute(
         "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at)"
         " SELECT 'tenant-1', 'k' || i, 'm1', 1, 1, %s::timestamptz + i * interval '1 hour' FROM generate_series(0, %s) i",
-        (T0, count - 1))
+        (T0, count - 1),
+    )
     conn.commit()
 
 
@@ -382,9 +417,12 @@ def test_the_unclosed_hours_list_says_when_it_was_cut(client, conn, hours, trunc
 
 # --- the deadline ---------------------------------------------------------------------------------------------------------
 
+
 def in_transaction(conn):
-    return conn.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
-                        " AND state LIKE 'idle in transaction%'").fetchone()["n"]
+    return conn.execute(
+        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        " AND state LIKE 'idle in transaction%'"
+    ).fetchone()["n"]
 
 
 @pytest.mark.parametrize("params", [{"limit": 5}, {}], ids=["paged", "unpaged"])
@@ -403,21 +441,27 @@ def test_a_pass_past_the_request_deadline_is_504_and_releases_its_connection(cli
     started = time.monotonic()
     resp = client.get(PATH, params={**span(20), **params})
     assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
-    assert time.monotonic() - started < 3                           # 20 rows x 50 ms would be 1 s: it stopped at 0.3 s
-    stats = db._request_pool().get_stats()                          # the connection went back to the pool (which keeps it open)
+    assert time.monotonic() - started < 3  # 20 rows x 50 ms would be 1 s: it stopped at 0.3 s
+    stats = db._request_pool().get_stats()  # the connection went back to the pool (which keeps it open)
     assert stats["pool_size"] - stats["pool_available"] == 0
-    assert in_transaction(conn) == 0                                # and went back with its transaction rolled back
+    assert in_transaction(conn) == 0  # and went back with its transaction rolled back
 
 
 # --- memory ---------------------------------------------------------------------------------------------------------------
 
+
 def seed_big(conn, models, hours):
-    conn.execute("INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
-                 " SELECT 'model-' || m, 1, %s, 1000, 2000 FROM generate_series(1, %s) m", (T0 - HOUR, models))
+    conn.execute(
+        "INSERT INTO price_versions (model, version, effective_from, input_micros_per_1k, output_micros_per_1k)"
+        " SELECT 'model-' || m, 1, %s, 1000, 2000 FROM generate_series(1, %s) m",
+        (T0 - HOUR, models),
+    )
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
         " SELECT 'tenant-1', 'model-' || m, %s::timestamptz + h * interval '1 hour', 1000 + h, 500 + m, 1"
-        " FROM generate_series(1, %s) m, generate_series(0, %s) h", (T0, models, hours - 1))
+        " FROM generate_series(1, %s) m, generate_series(0, %s) h",
+        (T0, models, hours - 1),
+    )
     conn.execute("ANALYZE usage_rollups_hourly")
     conn.commit()
 
@@ -434,8 +478,12 @@ def peak_of(call):
 FIRST_PAGE_PEAK_BOUND = 20 * 2**20
 
 
-def test_a_year_of_114_models_pages_in_bounded_memory_and_unpaged_is_refused_without_building_it(client, conn, monkeypatch, capsys):
-    monkeypatch.setattr(db, "REQUEST_STATEMENT_TIMEOUT_MS", 0)      # tracemalloc slows the pass; the deadline is tested above
+def test_a_year_of_114_models_pages_in_bounded_memory_and_unpaged_is_refused_without_building_it(
+    client, conn, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        db, "REQUEST_STATEMENT_TIMEOUT_MS", 0
+    )  # tracemalloc slows the pass; the deadline is tested above
     seed_big(conn, 114, 366 * 24)
     assert conn.execute("SELECT count(*) AS n FROM usage_rollups_hourly").fetchone()["n"] == 114 * 366 * 24
     params = {"start": T0.isoformat(), "end": (T0 + timedelta(days=366)).isoformat()}
@@ -446,19 +494,25 @@ def test_a_year_of_114_models_pages_in_bounded_memory_and_unpaged_is_refused_wit
     resp, unpaged = peak_of(lambda: client.get(PATH, params=params))
     assert resp.status_code == 422 and "page with limit" in resp.json()["detail"]
     with capsys.disabled():
-        print(f"\ntracemalloc peak, 1,002,096 rows: first page (limit 100) {paged / 2**20:.1f} MiB; unpaged refused {unpaged / 2**20:.1f} MiB")
+        print(
+            f"\ntracemalloc peak, 1,002,096 rows: first page (limit 100) {paged / 2**20:.1f} MiB; unpaged refused {unpaged / 2**20:.1f} MiB"
+        )
     assert paged < FIRST_PAGE_PEAK_BOUND and unpaged < FIRST_PAGE_PEAK_BOUND
 
 
 def test_forty_largest_pages_at_once_fit_in_a_stated_budget(client, conn, capsys):
     hours = pricing.MAX_PAGE // 2
-    seed_big(conn, 2, hours)                                        # exactly MAX_PAGE rows, inside the 366-day range
+    seed_big(conn, 2, hours)  # exactly MAX_PAGE rows, inside the 366-day range
     params = {"start": T0.isoformat(), "end": (T0 + hours * HOUR).isoformat(), "limit": pricing.MAX_PAGE}
     resp, peak = peak_of(lambda: client.get(PATH, params=params))
-    assert resp.status_code == 200 and len(resp.json()["lines"]) == pricing.MAX_PAGE and resp.json()["next_cursor"] is None
+    assert (
+        resp.status_code == 200 and len(resp.json()["lines"]) == pricing.MAX_PAGE and resp.json()["next_cursor"] is None
+    )
     with capsys.disabled():
-        print(f"\nmax page: {pricing.MAX_PAGE} lines, body {len(resp.content) / 2**20:.2f} MiB, tracemalloc peak {peak / 2**20:.1f} MiB,"
-              f" x40 = {40 * peak / 2**20:.0f} MiB")
+        print(
+            f"\nmax page: {pricing.MAX_PAGE} lines, body {len(resp.content) / 2**20:.2f} MiB, tracemalloc peak {peak / 2**20:.1f} MiB,"
+            f" x40 = {40 * peak / 2**20:.0f} MiB"
+        )
     assert 40 * peak < MAX_PAGE_BUDGET
 
 
@@ -472,33 +526,33 @@ SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
 
 def test_a_fresh_pooled_connection_accepts_the_snapshot_statement_first(conn, monkeypatch):
     db.close_pool()
-    with db.request_connection() as c:                              # just made by the pool, configured, never used
+    with db.request_connection() as c:  # just made by the pool, configured, never used
         assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
         c.execute(SNAPSHOT)
         assert c.execute("SHOW transaction_isolation").fetchone()["transaction_isolation"] == "repeatable read"
 
 
 def test_a_reused_pooled_connection_accepts_it_too_after_work_and_after_a_failure(conn, monkeypatch, client):
-    monkeypatch.setenv("DB_POOL_MAX", "1")                          # one connection: every borrow is the one just returned
+    monkeypatch.setenv("DB_POOL_MAX", "1")  # one connection: every borrow is the one just returned
     add_price_version(conn, "m1", T0 - HOUR, 1000, 1000)
     rollup(conn, "m1", T0)
     pids = set()
-    with db.request_connection() as c:                              # a borrower that used the connection, then took the lock path
+    with db.request_connection() as c:  # a borrower that used the connection, then took the lock path
         pids.add(c.info.backend_pid)
         c.execute(SNAPSHOT)
         c.execute("SELECT 1")
     with pytest.raises(RuntimeError):
-        with db.request_connection() as c:                          # a borrower that failed midway, inside a transaction
+        with db.request_connection() as c:  # a borrower that failed midway, inside a transaction
             pids.add(c.info.backend_pid)
             c.execute("SELECT 1")
             raise RuntimeError("boom")
-    with db.request_connection() as c:                              # direct: SET TRANSACTION first, on the returned connection
+    with db.request_connection() as c:  # direct: SET TRANSACTION first, on the returned connection
         pids.add(c.info.backend_pid)
         assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
         c.execute(SNAPSHOT)
-    for params in ({"limit": 5}, {}):                               # and whole requests (edge checkout, then the handler's)
+    for params in ({"limit": 5}, {}):  # and whole requests (edge checkout, then the handler's)
         resp = client.get(PATH, params={**span(1), **params})
         assert resp.status_code == 200 and len(resp.json()["lines"]) == 1
     with db.request_connection() as c:
         pids.add(c.info.backend_pid)
-    assert len(pids) == 1                                           # it really was one connection throughout
+    assert len(pids) == 1  # it really was one connection throughout

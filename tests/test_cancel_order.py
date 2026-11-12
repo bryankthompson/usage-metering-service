@@ -2,6 +2,7 @@
 reopened, so a delete that is OLDER than an applied payment failure is still applied (RT-concurrency-4). It is applied
 without moving `last_event_at` backwards. A delete of a different subscription id, or a row with no stored id, is judged by the
 shared clock as before."""
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,8 +26,11 @@ def client():
 
 def edge_status(client, tenant="tenant-1") -> int:
     """What the real edge says to this tenant right now: 200 allowed, 402 denied."""
-    return client.get(f"/v1/tenants/{tenant}/charges", headers={"X-Tenant-Id": tenant},
-                      params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"}).status_code
+    return client.get(
+        f"/v1/tenants/{tenant}/charges",
+        headers={"X-Tenant-Id": tenant},
+        params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
+    ).status_code
 
 
 def delete(client, event_id, created, sub_id="sub_x"):
@@ -45,7 +49,12 @@ def test_a_delete_older_than_an_applied_failure_still_cancels_the_stored_subscri
     failed_before_the_cancel(c, conn)
     assert delete(c, "evt_3", T).json() == {"status": "processed"}
     r = row(conn)
-    assert (r["status"], r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == ("canceled", None, None, at(T + 1))
+    assert (r["status"], r["payment_failed_at"], r["grace_until"], r["last_event_at"]) == (
+        "canceled",
+        None,
+        None,
+        at(T + 1),
+    )
     assert edge_status(c) == 402
     assert delete(c, "evt_3", T).json() == {"status": "duplicate"}
 
@@ -72,10 +81,17 @@ def test_a_late_delete_of_an_earlier_subscription_does_not_cancel_the_new_one(cl
     c = client
     post(c, subscription_event("evt_1", T - 20, sub_id="sub_1"))
     assert delete(c, "evt_2", T - 10, sub_id="sub_1").json() == {"status": "processed"}
-    assert post(c, subscription_event("evt_3", T + 5, sub_id="sub_2", event_type="customer.subscription.created")).json() == {"status": "processed"}
+    assert post(
+        c, subscription_event("evt_3", T + 5, sub_id="sub_2", event_type="customer.subscription.created")
+    ).json() == {"status": "processed"}
     assert delete(c, "evt_4", T + 1, sub_id="sub_1").json() == {"status": "stale"}
     r = row(conn)
-    assert (r["status"], r["stripe_subscription_id"], r["last_event_at"], edge_status(c)) == ("active", "sub_2", at(T + 5), 200)
+    assert (r["status"], r["stripe_subscription_id"], r["last_event_at"], edge_status(c)) == (
+        "active",
+        "sub_2",
+        at(T + 5),
+        200,
+    )
 
 
 def test_a_row_with_no_stored_subscription_id_is_judged_by_the_shared_clock(client, conn):

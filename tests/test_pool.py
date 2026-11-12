@@ -4,6 +4,7 @@ What must hold: Postgres never sees more request-path sessions than the cap; a b
 path's (statement timeout, UTC, autocommit off, no state left behind); nothing deadlocks when requests outnumber the
 slots; a database that stops and comes back, or a killed backend, costs requests only while it is gone; and when the pool
 cannot give a connection the edge denies (503) instead of admitting."""
+
 import socket
 import threading
 import time
@@ -54,11 +55,14 @@ def own_pids(*connections) -> list[int]:
 
 
 def backends_other_than(observer, *mine) -> int:
-    return observer.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()"
-                            " AND NOT (pid = ANY(%s))", (own_pids(observer, *mine),)).fetchone()["n"]
+    return observer.execute(
+        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()" " AND NOT (pid = ANY(%s))",
+        (own_pids(observer, *mine),),
+    ).fetchone()["n"]
 
 
 # --- the library's error classes, on the installed version -----------------------------------------------------------
+
 
 @pytest.mark.parametrize("error", [PoolTimeout, TooManyRequests])
 def test_the_pools_refusals_are_operational_errors_so_they_are_503(error):
@@ -66,6 +70,7 @@ def test_the_pools_refusals_are_operational_errors_so_they_are_503(error):
 
 
 # --- configuration ---------------------------------------------------------------------------------------------------
+
 
 def test_the_defaults_follow_the_worker_thread_limit_and_the_connect_timeout():
     pool = db._request_pool()
@@ -83,8 +88,16 @@ def test_a_cap_of_one_still_starts(monkeypatch):
     assert (db._request_pool().min_size, db._request_pool().max_size) == (1, 1)
 
 
-@pytest.mark.parametrize(("name", "value"), [("DB_POOL_MAX", "many"), ("DB_POOL_MAX", "0"), ("DB_POOL_MAX", "-3"),
-                                             ("DB_POOL_TIMEOUT", "soon"), ("DB_POOL_TIMEOUT", "0")])
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("DB_POOL_MAX", "many"),
+        ("DB_POOL_MAX", "0"),
+        ("DB_POOL_MAX", "-3"),
+        ("DB_POOL_TIMEOUT", "soon"),
+        ("DB_POOL_TIMEOUT", "0"),
+    ],
+)
 def test_a_bad_setting_fails_loudly_and_names_itself(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(ValueError, match=name):
@@ -100,7 +113,9 @@ def test_closing_the_pool_twice_is_fine_and_the_next_use_opens_a_new_one():
 
 
 def test_the_app_starts_and_the_pool_is_made_with_the_database_down(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://metering:metering@localhost:1/metering")   # nothing listens on port 1
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://metering:metering@localhost:1/metering"
+    )  # nothing listens on port 1
     pool_settings(monkeypatch, 3, 0.5)
     started = time.monotonic()
     with pytest.raises(PoolTimeout):
@@ -111,11 +126,12 @@ def test_the_app_starts_and_the_pool_is_made_with_the_database_down(monkeypatch)
 
 # --- (a) the cap -----------------------------------------------------------------------------------------------------
 
+
 def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn, monkeypatch):
     cap = 6
     pool_settings(monkeypatch, cap)
     sampler = db.connect()
-    sampler.autocommit = True                       # so every poll sees a fresh pg_stat_activity
+    sampler.autocommit = True  # so every poll sees a fresh pg_stat_activity
     peak, done = [0], threading.Event()
 
     def sample():
@@ -127,14 +143,18 @@ def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn
     watcher.start()
     try:
         try:
-            with TestClient(app, raise_server_exceptions=False) as shared, ThreadPoolExecutor(max_workers=60) as senders:
+            with (
+                TestClient(app, raise_server_exceptions=False) as shared,
+                ThreadPoolExecutor(max_workers=60) as senders,
+            ):
                 sends = [senders.submit(post, shared, f"k{i}") for i in range(200)]
                 statuses = [s.result(timeout=DEADLINE_S).status_code for s in sends]
         finally:
             done.set()
             watcher.join()
-        pooled = sampler.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s",
-                                 (db.APPLICATION_NAME,)).fetchone()["n"]
+        pooled = sampler.execute(
+            "SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s", (db.APPLICATION_NAME,)
+        ).fetchone()["n"]
     finally:
         sampler.close()
     assert statuses == [201] * 200
@@ -145,11 +165,12 @@ def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn
 
 # --- (b) a borrowed session is clean, every time ---------------------------------------------------------------------
 
+
 def session_facts(c):
     """What the request path relies on, read inside the session that was borrowed."""
     return {
         "autocommit": c.autocommit,
-        "prepare_threshold": c.prepare_threshold,     # None: a long-lived connection never switches to generic plans
+        "prepare_threshold": c.prepare_threshold,  # None: a long-lived connection never switches to generic plans
         "statement_timeout": c.execute("SHOW statement_timeout").fetchone()["statement_timeout"],
         "TimeZone": c.execute("SHOW TimeZone").fetchone()["TimeZone"],
         "lock_timeout": c.execute("SHOW lock_timeout").fetchone()["lock_timeout"],
@@ -157,20 +178,26 @@ def session_facts(c):
     }
 
 
-CLEAN = {"autocommit": False, "prepare_threshold": None, "statement_timeout": "15s", "TimeZone": "UTC", "lock_timeout": "0",
-         "application_name": db.APPLICATION_NAME}
+CLEAN = {
+    "autocommit": False,
+    "prepare_threshold": None,
+    "statement_timeout": "15s",
+    "TimeZone": "UTC",
+    "lock_timeout": "0",
+    "application_name": db.APPLICATION_NAME,
+}
 
 
 def test_every_borrow_is_the_request_sessions_even_after_a_borrower_failed(conn, monkeypatch):
-    pool_settings(monkeypatch, 1)                   # one physical connection, so every borrow is the same session
+    pool_settings(monkeypatch, 1)  # one physical connection, so every borrow is the same session
     pids, seen = [], []
 
     def borrow(fail=False):
         with db.request_connection() as c:
-            assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE      # nothing open when it is handed out
+            assert c.info.transaction_status == psycopg.pq.TransactionStatus.IDLE  # nothing open when it is handed out
             pids.append(c.info.backend_pid)
             seen.append(session_facts(c))
-            db.limit_lock_wait(c)                                                      # the request path's transaction state
+            db.limit_lock_wait(c)  # the request path's transaction state
             c.execute("SELECT pg_advisory_xact_lock(1, 1)")
             if fail:
                 raise ZeroDivisionError
@@ -185,9 +212,9 @@ def test_every_borrow_is_the_request_sessions_even_after_a_borrower_failed(conn,
 def test_after_a_mix_of_requests_the_session_holds_no_state_and_no_lock(api, conn, monkeypatch):
     pool_settings(monkeypatch, 1)
     assert post(api, "a").status_code == 201
-    assert post(api, "a").status_code == 200                                           # a duplicate
-    assert post(api, "a", tokens_in=99).status_code == 409                             # a conflict
-    assert post(api, "b", tenant_id="t2").status_code == 403                           # refused after the edge
+    assert post(api, "a").status_code == 200  # a duplicate
+    assert post(api, "a", tokens_in=99).status_code == 409  # a conflict
+    assert post(api, "b", tenant_id="t2").status_code == 403  # refused after the edge
     assert api.get("/v1/tenants/t1/charges", params=RANGE, headers={"X-Tenant-Id": "t1"}).status_code == 200
     assert api.get("/v1/tenants/t1/charges", params={"start": "x"}, headers={"X-Tenant-Id": "t1"}).status_code == 422
     conn.commit()
@@ -198,12 +225,15 @@ def test_after_a_mix_of_requests_the_session_holds_no_state_and_no_lock(api, con
 
 # --- (c) no deadlock when requests outnumber the slots ---------------------------------------------------------------
 
+
 def test_more_concurrent_requests_than_pool_slots_all_finish(api, conn, monkeypatch):
     pool_settings(monkeypatch, 2, 3)
     headers = {"X-Tenant-Id": "t1"}
     with TestClient(app, raise_server_exceptions=False) as shared, ThreadPoolExecutor(max_workers=40) as senders:
         sends = [senders.submit(post, shared, f"k{i}") for i in range(30)]
-        sends += [senders.submit(shared.get, "/v1/tenants/t1/charges", params=RANGE, headers=headers) for _ in range(10)]
+        sends += [
+            senders.submit(shared.get, "/v1/tenants/t1/charges", params=RANGE, headers=headers) for _ in range(10)
+        ]
         statuses = [s.result(timeout=DEADLINE_S).status_code for s in sends]
     assert statuses == [201] * 30 + [200] * 10
     assert stored(conn) == 30
@@ -217,7 +247,7 @@ def test_a_thread_that_asks_for_a_second_connection_is_refused_at_once_not_after
             with db.request_connection():
                 pytest.fail("a second connection was given to a thread that holds one")
     assert time.monotonic() - started < 5
-    with db.request_connection() as c:                                                 # and the first was given back
+    with db.request_connection() as c:  # and the first was given back
         assert c.execute("SELECT 1 AS one").fetchone()["one"] == 1
 
 
@@ -231,6 +261,7 @@ def test_a_failed_borrow_does_not_leave_the_thread_marked_as_holding_one(monkeyp
 
 
 # --- (d) the database goes away and comes back -----------------------------------------------------------------------
+
 
 class Proxy:
     """A TCP forwarder to the test database that can be stopped (every connection cut, nothing listening) and started again
@@ -281,7 +312,7 @@ class Proxy:
     def stop(self):
         self.running = False
         try:
-            self.listener.shutdown(socket.SHUT_RDWR)      # close() alone leaves a blocked accept() holding the port
+            self.listener.shutdown(socket.SHUT_RDWR)  # close() alone leaves a blocked accept() holding the port
         except OSError:
             pass
         self.listener.close()
@@ -293,7 +324,9 @@ class Proxy:
             except OSError:
                 pass
             s.close()
-        assert not self.acceptor.is_alive(), "the proxy's accept thread did not stop"      # after the cleanup, which always runs
+        assert (
+            not self.acceptor.is_alive()
+        ), "the proxy's accept thread did not stop"  # after the cleanup, which always runs
 
     @property
     def url(self):
@@ -312,7 +345,7 @@ def test_a_database_that_stops_and_starts_is_503_while_down_and_201_after_with_n
         assert (down.status_code, down.json()) == (503, {"detail": "entitlement check unavailable"})
         assert stored(conn) == 1
         proxy.start()
-        assert post(api, "while-down").status_code == 201                              # the same key, the same process
+        assert post(api, "while-down").status_code == 201  # the same key, the same process
         assert post(api, "after").status_code == 201
         assert stored(conn) == 3
     finally:
@@ -322,23 +355,27 @@ def test_a_database_that_stops_and_starts_is_503_while_down_and_201_after_with_n
 
 # --- (e) a killed backend is replaced --------------------------------------------------------------------------------
 
+
 def test_a_backend_killed_while_idle_in_the_pool_is_replaced_and_the_next_request_succeeds(api, conn, monkeypatch):
     pool_settings(monkeypatch, 3)
     assert post(api, "warm").status_code == 201
-    killed = conn.execute("SELECT count(pg_terminate_backend(pid)) AS n FROM pg_stat_activity WHERE application_name = %s",
-                          (db.APPLICATION_NAME,)).fetchone()["n"]
+    killed = conn.execute(
+        "SELECT count(pg_terminate_backend(pid)) AS n FROM pg_stat_activity WHERE application_name = %s",
+        (db.APPLICATION_NAME,),
+    ).fetchone()["n"]
     conn.commit()
     assert killed >= 1
-    time.sleep(0.2)                                                                    # let the backends really go
+    time.sleep(0.2)  # let the backends really go
     assert post(api, "after-kill").status_code == 201
     assert stored(conn) == 2
 
 
 # --- (f) a pool that cannot give a connection is 503, and the edge denies ---------------------------------------------
 
+
 def test_a_pool_with_no_free_connection_makes_the_edge_deny_and_nothing_is_stored(api, conn, monkeypatch, caplog):
     pool_settings(monkeypatch, 1, 0.5)
-    with db.request_connection():                                                      # the only slot, taken
+    with db.request_connection():  # the only slot, taken
         with ThreadPoolExecutor(max_workers=1) as one:
             resp = one.submit(post, api, "k1").result(timeout=DEADLINE_S)
     assert (resp.status_code, resp.json()) == (503, {"detail": "entitlement check unavailable"})
@@ -355,11 +392,17 @@ def test_a_pool_with_no_free_connection_after_the_edge_admitted_is_503_database_
                 resp = one.submit(post, TestClient(app, raise_server_exceptions=False), "k1").result(timeout=DEADLINE_S)
     finally:
         app.dependency_overrides.clear()
-    assert (resp.status_code, resp.json(), resp.headers["retry-after"]) == (503, {"detail": "database unavailable"}, "1")
+    assert (resp.status_code, resp.json(), resp.headers["retry-after"]) == (
+        503,
+        {"detail": "database unavailable"},
+        "1",
+    )
     assert stored(conn) == 0
 
 
-@pytest.mark.parametrize("error", [PoolTimeout("no connection"), TooManyRequests("too many waiting")], ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize(
+    "error", [PoolTimeout("no connection"), TooManyRequests("too many waiting")], ids=lambda e: type(e).__name__
+)
 def test_both_pool_refusals_are_503_at_the_edge_and_in_the_handler(api, conn, monkeypatch, error):
     def refuse():
         raise error
@@ -376,6 +419,8 @@ def test_both_pool_refusals_are_503_at_the_edge_and_in_the_handler(api, conn, mo
     finally:
         app.dependency_overrides.clear()
     assert (in_handler.status_code, in_handler.json(), in_handler.headers["retry-after"]) == (
-        503, {"detail": "database unavailable"}, "1")
+        503,
+        {"detail": "database unavailable"},
+        "1",
+    )
     assert stored(conn) == 0
-

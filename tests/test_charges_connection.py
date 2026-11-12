@@ -3,6 +3,7 @@
 A dependency's connection stays held while the request waits for a free worker thread (the note in `ingest_usage`), so a
 burst of charges requests used up the database's connection slots; with the pool that would also be a deadlock. And a
 refused request (wrong tenant, a 422) has no reason to take a connection at all."""
+
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -45,7 +46,9 @@ REFUSED = [
     pytest.param("tenant-2", GOOD, 403, id="another tenant"),
     pytest.param("tenant-1", {"start": "2026-11-01T00:00:00", "end": "2026-11-01T03:00:00"}, 422, id="naive datetimes"),
     pytest.param("tenant-1", {"start": GOOD["end"], "end": GOOD["start"]}, 422, id="range runs backwards"),
-    pytest.param("tenant-1", {"start": GOOD["start"], "end": (T0 + timedelta(days=400)).isoformat()}, 422, id="range too wide"),
+    pytest.param(
+        "tenant-1", {"start": GOOD["start"], "end": (T0 + timedelta(days=400)).isoformat()}, 422, id="range too wide"
+    ),
     pytest.param("tenant-1", {"start": "5", "end": GOOD["end"]}, 422, id="start is not ISO text"),
 ]
 
@@ -63,8 +66,11 @@ def test_an_answered_charges_request_opens_exactly_one_connection(client, conn, 
 
 
 def test_a_missing_price_is_still_409_and_closes_its_connection(client, conn, connects):
-    conn.execute("INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-                 " VALUES ('tenant-1', 'unpriced', %s, 1, 1, 1)", (T0,))
+    conn.execute(
+        "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
+        " VALUES ('tenant-1', 'unpriced', %s, 1, 1, 1)",
+        (T0,),
+    )
     conn.commit()
     resp = client.get("/v1/tenants/tenant-1/charges", params=GOOD)
     assert resp.status_code == 409 and "no price for model 'unpriced'" in resp.json()["detail"]
@@ -77,7 +83,11 @@ def test_a_database_that_cannot_be_reached_is_503_with_retry_after_1(client, mon
 
     monkeypatch.setattr(db, "request_connection", refuse)
     resp = client.get("/v1/tenants/tenant-1/charges", params=GOOD)
-    assert (resp.status_code, resp.json(), resp.headers["retry-after"]) == (503, {"detail": "database unavailable"}, "1")
+    assert (resp.status_code, resp.json(), resp.headers["retry-after"]) == (
+        503,
+        {"detail": "database unavailable"},
+        "1",
+    )
 
 
 def checked_out() -> int:
@@ -90,8 +100,9 @@ def backends(conn) -> int:
     """Sessions on this database other than the test's own. The commit first: pg_stat_activity is a snapshot that is kept
     until the transaction ends, so without it every poll would repeat the first answer."""
     conn.commit()
-    return conn.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()"
-                        " AND pid <> pg_backend_pid()").fetchone()["n"]
+    return conn.execute(
+        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()" " AND pid <> pg_backend_pid()"
+    ).fetchone()["n"]
 
 
 def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_that_has_no_thread(conn, monkeypatch):
@@ -115,12 +126,12 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
         with TestClient(app) as shared, ThreadPoolExecutor(max_workers=60) as pool:
             senders = [pool.submit(shared.get, "/v1/tenants/tenant-1/charges", params=GOOD) for _ in range(60)]
             seen, steady = (-1, -1), 0
-            for _ in range(600):                                     # until the number of stalled requests stops growing
+            for _ in range(600):  # until the number of stalled requests stops growing
                 time.sleep(0.05)
                 with lock:
                     now = (len(inside), checked_out())
                 steady = steady + 1 if now == seen and now[0] > 0 else 0
-                if steady >= 6:                                      # unchanged for 0.3 s: the pool is full
+                if steady >= 6:  # unchanged for 0.3 s: the pool is full
                     break
                 seen = now
             else:
@@ -133,6 +144,8 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
         release.set()
         app.dependency_overrides.clear()
     assert stalled_requests < 60, "the worker pool was never full, so this test shows nothing"
-    assert held == stalled_requests, f"{held} connections checked out for {stalled_requests} requests that hold a worker thread"
+    assert (
+        held == stalled_requests
+    ), f"{held} connections checked out for {stalled_requests} requests that hold a worker thread"
     assert backend_count <= db.DEFAULT_POOL_MAX
     assert statuses == {200}

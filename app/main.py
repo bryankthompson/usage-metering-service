@@ -24,8 +24,8 @@ def configure_logging() -> None:
     raw = os.environ.get("LOG_LEVEL", "INFO")
     name = raw.strip().upper()
     level = name if name in LOG_LEVELS else "INFO"
-    logging.basicConfig(level=level, format=LOG_FORMAT)        # does nothing if the root logger already has a handler
-    logging.getLogger("app").setLevel(level)                   # so the level holds even then
+    logging.basicConfig(level=level, format=LOG_FORMAT)  # does nothing if the root logger already has a handler
+    logging.getLogger("app").setLevel(level)  # so the level holds even then
     if name not in LOG_LEVELS:
         logging.getLogger("app").warning("LOG_LEVEL=%r is not one of %s; using INFO", raw, ", ".join(LOG_LEVELS))
 
@@ -34,7 +34,9 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="usage-metering")
     # The cap is per path: a new POST route that takes a body must be added to `limits`, or it has no cap (the webhook has its own).
-    app.add_middleware(BodyLimit, limits={"/v1/usage": ingest.MAX_BODY_BYTES, "/v1/usage/batch": ingest.MAX_BATCH_BODY_BYTES})
+    app.add_middleware(
+        BodyLimit, limits={"/v1/usage": ingest.MAX_BODY_BYTES, "/v1/usage/batch": ingest.MAX_BATCH_BODY_BYTES}
+    )
 
     @app.exception_handler(psycopg.OperationalError)
     async def database_unavailable(request: Request, exc: psycopg.OperationalError) -> JSONResponse:

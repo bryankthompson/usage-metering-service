@@ -1,4 +1,5 @@
 """A database that stops answering must be a 503 within seconds, not a hang that fills the thread pool."""
+
 import socket
 import threading
 import time
@@ -10,8 +11,14 @@ from fastapi.testclient import TestClient
 from app import db, ingest, pricing, rollup
 from app.main import app, create_app
 
-BODY = {"tenant_id": "t1", "idempotency_key": "k1", "model": "m1", "tokens_in": 1, "tokens_out": 1,
-        "occurred_at": "2026-11-10T10:30:00Z"}
+BODY = {
+    "tenant_id": "t1",
+    "idempotency_key": "k1",
+    "model": "m1",
+    "tokens_in": 1,
+    "tokens_out": 1,
+    "occurred_at": "2026-11-10T10:30:00Z",
+}
 
 
 @pytest.fixture
@@ -75,8 +82,11 @@ def test_a_statement_past_the_timeout_is_a_504_query_timed_out_not_a_503_and_not
     monkeypatch.setattr(pricing, "charge_lines", slow)
     client = TestClient(app, raise_server_exceptions=False)
     started = time.monotonic()
-    resp = client.get("/v1/tenants/t1/charges", params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
-                      headers={"X-Tenant-Id": "t1"})
+    resp = client.get(
+        "/v1/tenants/t1/charges",
+        params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
+        headers={"X-Tenant-Id": "t1"},
+    )
     assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
     assert "retry-after" not in resp.headers
     assert time.monotonic() - started < 4
@@ -105,7 +115,9 @@ def test_a_usage_statement_past_the_timeout_is_a_504_stores_nothing_and_a_resend
     assert client.post("/v1/usage", json=BODY, headers={"X-Tenant-Id": "t1"}).status_code == 201
 
 
-@pytest.mark.parametrize("error", [psycopg.errors.LockNotAvailable("lock timeout"), psycopg.OperationalError("refused")])
+@pytest.mark.parametrize(
+    "error", [psycopg.errors.LockNotAvailable("lock timeout"), psycopg.OperationalError("refused")]
+)
 def test_a_lock_timeout_or_a_failed_connection_stays_a_503_database_unavailable(error):
     """The QueryCanceled handler must not catch its OperationalError siblings (test_lock_timeout.py covers the real lock)."""
     probe = create_app()
@@ -115,7 +127,11 @@ def test_a_lock_timeout_or_a_failed_connection_stays_a_503_database_unavailable(
         raise error
 
     resp = TestClient(probe, raise_server_exceptions=False).get("/probe")
-    assert (resp.status_code, resp.json(), resp.headers.get("retry-after")) == (503, {"detail": "database unavailable"}, "1")
+    assert (resp.status_code, resp.json(), resp.headers.get("retry-after")) == (
+        503,
+        {"detail": "database unavailable"},
+        "1",
+    )
 
 
 def test_the_default_connection_has_the_request_statement_timeout():

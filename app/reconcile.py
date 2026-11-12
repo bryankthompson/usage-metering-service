@@ -14,6 +14,7 @@ Also drift: a rollup row whose hour `closed_hours` does not list, because the bi
 CLI: `python -m app.reconcile`. Exit 0 clean, 1 drift found, 2 bad argument or malformed actuals line.
 Integer arithmetic only. Details in docs/reconcile.md.
 """
+
 import argparse
 import json
 import sys
@@ -60,9 +61,11 @@ FROM (SELECT CASE WHEN late THEN 'late'
 WHERE kind IS NOT NULL GROUP BY kind
 """
 
-NOT_BILLED_KINDS = (("late", "its hour was already closed when it arrived"),
-                    ("unclosed", "its hour ended over 2 hours ago and is still not closed"),
-                    ("future", "dated over 1 hour ahead"))
+NOT_BILLED_KINDS = (
+    ("late", "its hour was already closed when it arrived"),
+    ("unclosed", "its hour ended over 2 hours ago and is still not closed"),
+    ("future", "dated over 1 hour ahead"),
+)
 
 ACTUAL_FIELDS = ("tenant_id", "model", "hour", "tokens_in", "tokens_out")
 
@@ -165,29 +168,44 @@ def against_actuals(actuals: dict, stored: dict, tolerance_bps: int) -> list[str
 
 
 def rows_by_key(rows) -> dict:
-    return {(r["tenant_id"], r["model"], r["hour_start"]): (r["tokens_in"], r["tokens_out"], r["event_count"]) for r in rows}
+    return {
+        (r["tenant_id"], r["model"], r["hour_start"]): (r["tokens_in"], r["tokens_out"], r["event_count"]) for r in rows
+    }
 
 
 def orphan_drift(rows) -> list[str]:
-    return [f"DRIFT {label(r['tenant_id'], r['model'], r['hour_start'])} rollup row but its hour is not in closed_hours"
-            f" (rollup={(r['tokens_in'], r['tokens_out'], r['event_count'])})" for r in rows]
+    return [
+        f"DRIFT {label(r['tenant_id'], r['model'], r['hour_start'])} rollup row but its hour is not in closed_hours"
+        f" (rollup={(r['tokens_in'], r['tokens_out'], r['event_count'])})"
+        for r in rows
+    ]
 
 
 def not_billed_lines(not_billed: dict) -> list[str]:
-    return [f"not billed: {kind} events={n['events']} tokens_in={n['tokens_in']} tokens_out={n['tokens_out']} ({why})"
-            for (kind, why), n in ((k, not_billed[k[0]]) for k in NOT_BILLED_KINDS)]
+    return [
+        f"not billed: {kind} events={n['events']} tokens_in={n['tokens_in']} tokens_out={n['tokens_out']} ({why})"
+        for (kind, why), n in ((k, not_billed[k[0]]) for k in NOT_BILLED_KINDS)
+    ]
 
 
-def run(conn: psycopg.Connection, since: datetime | None, only: datetime | None, actuals: dict | None, tolerance_bps: int,
-        now: datetime | None = None):
+def run(
+    conn: psycopg.Connection,
+    since: datetime | None,
+    only: datetime | None,
+    actuals: dict | None,
+    tolerance_bps: int,
+    now: datetime | None = None,
+):
     """Returns (hours checked, rows checked, drift lines, actuals skipped, not billed). Reads only. `now` is for tests."""
     scope = {"since": since, "only": only}
     hours = [r["hour_start"] for r in conn.execute(CLOSED_HOURS, scope).fetchall()]
     events = rows_by_key(conn.execute(RECOMPUTE, {"hours": hours}).fetchall())
     stored = rows_by_key(conn.execute(STORED, {"hours": hours}).fetchall())
     orphans = conn.execute(ORPHAN_ROWS, scope).fetchall()
-    found = {r["kind"]: {"events": r["events"], "tokens_in": int(r["tokens_in"]), "tokens_out": int(r["tokens_out"])}
-             for r in conn.execute(NOT_BILLED, {**scope, "now": now or datetime.now(timezone.utc)}).fetchall()}
+    found = {
+        r["kind"]: {"events": r["events"], "tokens_in": int(r["tokens_in"]), "tokens_out": int(r["tokens_out"])}
+        for r in conn.execute(NOT_BILLED, {**scope, "now": now or datetime.now(timezone.utc)}).fetchall()
+    }
     not_billed = {kind: found.get(kind, {"events": 0, "tokens_in": 0, "tokens_out": 0}) for kind, _ in NOT_BILLED_KINDS}
     conn.rollback()
     drift = self_check(events, stored) + orphan_drift(orphans)
@@ -202,14 +220,31 @@ def run(conn: psycopg.Connection, since: datetime | None, only: datetime | None,
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m app.reconcile", description="Read-only check of the hourly rollups against the raw events and, with --actuals, against another source.")
+    parser = argparse.ArgumentParser(
+        prog="python -m app.reconcile",
+        description="Read-only check of the hourly rollups against the raw events and, with --actuals, against another source.",
+    )
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--hour", metavar="ISO", help="check only this closed UTC hour, e.g. 2026-11-10T14:00:00Z")
     scope.add_argument("--since", metavar="ISO", help="check closed hours starting at or after this time")
     parser.add_argument("--actuals", metavar="FILE.jsonl", help="totals from another source, one JSON object per line")
-    parser.add_argument("--tolerance-bps", type=int, default=100, metavar="BPS", help="allowed difference in basis points of the actual (default 100 = 1%%)")
-    parser.add_argument("--json", action="store_true", help="print one JSON object (hours, rows, drift, not_billed) instead of text lines")
-    parser.add_argument("--fail-on-unbilled", action="store_true", help="exit 1 when any late, unclosed or far-ahead event exists (default: information only)")
+    parser.add_argument(
+        "--tolerance-bps",
+        type=int,
+        default=100,
+        metavar="BPS",
+        help="allowed difference in basis points of the actual (default 100 = 1%%)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print one JSON object (hours, rows, drift, not_billed) instead of text lines",
+    )
+    parser.add_argument(
+        "--fail-on-unbilled",
+        action="store_true",
+        help="exit 1 when any late, unclosed or far-ahead event exists (default: information only)",
+    )
     args = parser.parse_args(argv)  # argparse exits 2 on a bad argument
     try:
         if args.tolerance_bps < 0:
@@ -224,7 +259,11 @@ def main(argv: list[str] | None = None) -> int:
     conn = db.connect(statement_timeout_ms=0)
     try:
         conn.read_only = True
-        print(f"reconcile: hour={args.hour or 'all closed'} since={args.since or '-'} actuals={args.actuals or '-'} tolerance_bps={args.tolerance_bps}", file=sys.stderr, flush=True)
+        print(
+            f"reconcile: hour={args.hour or 'all closed'} since={args.since or '-'} actuals={args.actuals or '-'} tolerance_bps={args.tolerance_bps}",
+            file=sys.stderr,
+            flush=True,
+        )
         hours, rows, drift, skipped, not_billed = run(conn, since, only, actuals, args.tolerance_bps)
         if only is not None and hours == 0:
             print(f"reconcile: --hour {args.hour} is not a closed hour", file=sys.stderr)

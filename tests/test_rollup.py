@@ -28,7 +28,8 @@ def add_event(conn, key, when, tenant="t1", model="mA", tokens_in=1, tokens_out=
     conn.execute(
         "INSERT INTO usage_events (tenant_id, idempotency_key, model, tokens_in, tokens_out, occurred_at, late)"
         " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (tenant, key, model, tokens_in, tokens_out, at(when), late))
+        (tenant, key, model, tokens_in, tokens_out, at(when), late),
+    )
     conn.commit()
 
 
@@ -55,8 +56,10 @@ def test_close_hour_sums_per_tenant_and_model_for_that_hour_only(conn):
 
     assert close_hour(conn, H) == (3, 4)
 
-    got = {(r["tenant_id"], r["model"]): (r["hour_start"], r["tokens_in"], r["tokens_out"], r["event_count"])
-           for r in rollups(conn)}
+    got = {
+        (r["tenant_id"], r["model"]): (r["hour_start"], r["tokens_in"], r["tokens_out"], r["event_count"])
+        for r in rollups(conn)
+    }
     assert got == {
         ("t1", "mA"): (H, 30, 3, 2),
         ("t1", "mB"): (H, 5, 5, 1),
@@ -87,11 +90,14 @@ def test_close_hour_takes_any_offset_that_is_a_utc_hour(conn):
     assert closed_hours(conn) == [H]
 
 
-@pytest.mark.parametrize("hour_start", [
-    datetime(2026, 11, 10, 10),                              # naive
-    datetime(2026, 11, 10, 10, 30, tzinfo=timezone.utc),     # not on an hour boundary
-    datetime(2026, 11, 10, 10, 0, 1, tzinfo=timezone.utc),
-])
+@pytest.mark.parametrize(
+    "hour_start",
+    [
+        datetime(2026, 11, 10, 10),  # naive
+        datetime(2026, 11, 10, 10, 30, tzinfo=timezone.utc),  # not on an hour boundary
+        datetime(2026, 11, 10, 10, 0, 1, tzinfo=timezone.utc),
+    ],
+)
 def test_close_hour_rejects_a_bad_hour_and_writes_nothing(conn, hour_start):
     with pytest.raises(ValueError):
         close_hour(conn, hour_start)
@@ -106,8 +112,15 @@ def client(conn):
 
 
 def body(key, when, **changes):
-    return {"tenant_id": "t1", "idempotency_key": key, "model": "mA", "tokens_in": 10, "tokens_out": 1,
-            "occurred_at": when, **changes}
+    return {
+        "tenant_id": "t1",
+        "idempotency_key": key,
+        "model": "mA",
+        "tokens_in": 10,
+        "tokens_out": 1,
+        "occurred_at": when,
+        **changes,
+    }
 
 
 def test_late_and_duplicate_events_never_change_a_closed_rollup(client, conn):
@@ -133,7 +146,8 @@ def waiting_for_advisory_lock(watcher):
     puts every checkout in one Postgres, so a waiter in another database must not count."""
     waiting = watcher.execute(
         "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
-        " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())").fetchone()["n"]
+        " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+    ).fetchone()["n"]
     watcher.commit()
     return waiting
 
@@ -149,9 +163,15 @@ def wait_until_blocked(watcher):
 
 def test_the_lock_wait_check_counts_this_database_only(conn):
     other_url = psycopg.conninfo.make_conninfo(db.database_url(), dbname="postgres")
-    sessions = {name: psycopg.connect(url) for name, url in (
-        ("foreign_holder", other_url), ("foreign_waiter", other_url),
-        ("local_holder", db.database_url()), ("local_waiter", db.database_url()))}
+    sessions = {
+        name: psycopg.connect(url)
+        for name, url in (
+            ("foreign_holder", other_url),
+            ("foreign_waiter", other_url),
+            ("local_holder", db.database_url()),
+            ("local_waiter", db.database_url()),
+        )
+    }
     pool = ThreadPoolExecutor(max_workers=2)
     try:
         for name in ("foreign_holder", "local_holder"):
@@ -161,7 +181,8 @@ def test_the_lock_wait_check_counts_this_database_only(conn):
         pool.submit(sessions["foreign_waiter"].execute, "SELECT pg_advisory_xact_lock(9, 9)")
         for _ in range(500):  # wait until the foreign waiter is really waiting (pg_locks, all databases)
             everywhere = conn.execute(
-                "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").fetchone()["n"]
+                "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+            ).fetchone()["n"]
             conn.commit()
             if everywhere:
                 break
@@ -209,9 +230,17 @@ def test_a_close_waits_for_an_ingest_already_in_flight_and_counts_it(conn):
         # An ingest part way through: it holds the shared lock and has inserted, but has not committed.
         when = H + timedelta(minutes=30)
         lock_hour_shared(ingester, when)
-        row = ingester.execute(INSERT_EVENT, {
-            "tenant_id": "t1", "idempotency_key": "in-flight", "model": "mA", "tokens_in": 10, "tokens_out": 1,
-            "occurred_at": when}).fetchone()
+        row = ingester.execute(
+            INSERT_EVENT,
+            {
+                "tenant_id": "t1",
+                "idempotency_key": "in-flight",
+                "model": "mA",
+                "tokens_in": 10,
+                "tokens_out": 1,
+                "occurred_at": when,
+            },
+        ).fetchone()
         assert row is not None
 
         def close_on_own_connection():
@@ -245,11 +274,11 @@ def test_close_due_hours_honours_the_grace_period(conn):
     def hour(h):
         return datetime(2026, 11, 10, h, tzinfo=timezone.utc)
 
-    assert close_due_hours(conn, at("2026-11-10T09:04:59Z")) == []   # hour 8 ended 4m59s ago
+    assert close_due_hours(conn, at("2026-11-10T09:04:59Z")) == []  # hour 8 ended 4m59s ago
     assert close_due_hours(conn, at("2026-11-10T09:04:59Z"), grace=timedelta(0)) == [(hour(8), 1, 1)]
-    assert close_due_hours(conn, at("2026-11-10T10:04:59Z")) == []   # hour 9 ended 4m59s ago
+    assert close_due_hours(conn, at("2026-11-10T10:04:59Z")) == []  # hour 9 ended 4m59s ago
     assert close_due_hours(conn, at("2026-11-10T10:05:00Z")) == [(hour(9), 1, 1)]  # exactly the grace
-    assert close_due_hours(conn, at("2026-11-10T10:05:00Z")) == []   # nothing new is due
+    assert close_due_hours(conn, at("2026-11-10T10:05:00Z")) == []  # nothing new is due
     assert close_due_hours(conn, at("2026-11-10T11:05:00Z")) == [(hour(10), 1, 1)]
     assert closed_hours(conn) == [hour(8), hour(9), hour(10)]
 
@@ -272,8 +301,9 @@ def run_cli(*args, database_url=None):
     env = None
     if database_url:
         env = {**os.environ, "DATABASE_URL": database_url}
-    return subprocess.run([sys.executable, "-m", "app.rollup", *args], cwd=ROOT, env=env,
-                          capture_output=True, text=True, timeout=60)
+    return subprocess.run(
+        [sys.executable, "-m", "app.rollup", *args], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60
+    )
 
 
 def test_cli_closes_due_hours_once_and_says_when_nothing_is_due(conn):

@@ -24,7 +24,8 @@ def seed(conn):
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
         " VALUES ('tenant-1', 'm1', %s, 1000, 500, 3), ('tenant-1', 'm1', %s, 1, 0, 1)",
-        (T0, T0 + timedelta(hours=1)))
+        (T0, T0 + timedelta(hours=1)),
+    )
     conn.commit()
 
 
@@ -33,7 +34,7 @@ def test_charges_response(client, conn):
     resp = client.get("/v1/tenants/tenant-1/charges", params=RANGE)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total_micros"] == 2000 + 1                                      # 1000 + 1000 for hour 0, 1 for hour 1
+    assert body["total_micros"] == 2000 + 1  # 1000 + 1000 for hour 0, 1 for hour 1
     assert [line["micros"] for line in body["lines"]] == [2000, 1]
     assert body["lines"][0]["price_version"] == 1
     assert isinstance(body["total_micros"], int)
@@ -57,7 +58,9 @@ def test_charges_range_must_run_forward(client, conn):
 def test_charges_with_a_missing_price_is_409_not_zero(client, conn):
     conn.execute(
         "INSERT INTO usage_rollups_hourly (tenant_id, model, hour_start, tokens_in, tokens_out, event_count)"
-        " VALUES ('tenant-1', 'unpriced', %s, 10, 10, 1)", (T0,))
+        " VALUES ('tenant-1', 'unpriced', %s, 10, 10, 1)",
+        (T0,),
+    )
     conn.commit()
     resp = client.get("/v1/tenants/tenant-1/charges", params=RANGE)
     assert resp.status_code == 409
@@ -79,9 +82,17 @@ def test_a_range_split_inside_or_on_an_hour_bills_no_hour_twice_and_none_dropped
     add_price_version(conn, "m2", T0, 1500, 3000)
     sent = [("m1", "10:05", 1000, 500), ("m2", "10:40", 200, 100), ("m1", "11:10", 1, 0), ("m2", "11:55", 3, 3)]
     for i, (model, at, tokens_in, tokens_out) in enumerate(sent):
-        r = client.post("/v1/usage", json={"tenant_id": "tenant-1", "idempotency_key": f"k{i}", "model": model,
-                                           "tokens_in": tokens_in, "tokens_out": tokens_out,
-                                           "occurred_at": f"2026-11-01T{at}:00Z"})
+        r = client.post(
+            "/v1/usage",
+            json={
+                "tenant_id": "tenant-1",
+                "idempotency_key": f"k{i}",
+                "model": model,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "occurred_at": f"2026-11-01T{at}:00Z",
+            },
+        )
         assert r.status_code == 201
     for hour in (10, 11):
         assert close_hour(conn, T0 + timedelta(hours=hour)) is not None
@@ -95,9 +106,13 @@ def test_a_range_split_inside_or_on_an_hour_bills_no_hour_twice_and_none_dropped
     whole = charges("2026-11-01T10:00:00Z", "2026-11-01T12:00:00Z")
     first = charges("2026-11-01T10:00:00Z", split)
     second = charges(split, "2026-11-01T12:00:00Z")
-    assert whole["total_micros"] == 2000 + 600 + 1 + 14                          # all four lines, once each
+    assert whole["total_micros"] == 2000 + 600 + 1 + 14  # all four lines, once each
     assert len(whole["lines"]) == 4
     assert first["total_micros"] + second["total_micros"] == whole["total_micros"]
-    assert first["lines"] + second["lines"] == whole["lines"]                    # the same lines, none twice, none dropped
-    assert {line["hour_start"] for line in first["lines"]} == {"2026-11-01T10:00:00Z"}   # the hour that starts before the split
-    assert {line["hour_start"] for line in second["lines"]} == {"2026-11-01T11:00:00Z"}  # the hour that starts at or after it
+    assert first["lines"] + second["lines"] == whole["lines"]  # the same lines, none twice, none dropped
+    assert {line["hour_start"] for line in first["lines"]} == {
+        "2026-11-01T10:00:00Z"
+    }  # the hour that starts before the split
+    assert {line["hour_start"] for line in second["lines"]} == {
+        "2026-11-01T11:00:00Z"
+    }  # the hour that starts at or after it
