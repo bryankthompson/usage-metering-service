@@ -73,8 +73,8 @@ status: **402**. `active`: allowed. `past_due`: allowed while now is no later th
 Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
 a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open
 (the edge's own 503, "entitlement check unavailable", carries no `Retry-After`). A statement that runs more than 15 s on the request path is
-**504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on the routes whose database error reaches the
-handler in `app/main.py`, such as the charges route and the webhook route; `POST /v1/usage` and the entitlement edge catch it themselves and still answer 503. The
+**504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on every route after the entitlement edge,
+`POST /v1/usage` included; the entitlement edge catches it itself and still answers 503. The
 rollup, reconcile and delinquent runs have no statement timeout.
 
 **7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and

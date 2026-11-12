@@ -278,8 +278,8 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | Customer says usage is lower than billed | two keys for one call, or the wrong price version | 7, 6 |
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
-| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying (on `/v1/usage` also a statement over 15 s) | 11 |
-| 504 `query timed out`, no `retry-after` | a statement over 15 s on the charges or webhook route | 11 |
+| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying | 11 |
+| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included | 11 |
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |
