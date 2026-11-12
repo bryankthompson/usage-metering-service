@@ -84,7 +84,7 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime, defer_mirror: lis
 
     Commits (or rolls back and re-raises). Closing an hour twice changes nothing. After the commit, when
     CLICKHOUSE_URL is set, the rows are copied to ClickHouse; that copy can fail without failing the close (app/mirror.py).
-    With `defer_mirror` (a list), the copy is not made here: (hour, rows) is appended to it for the caller to mirror.
+    With `defer_mirror` (a list), the copy is not made here: (hour, rows) is appended to it for the caller to mirror. Nothing is appended when the mirror is off.
     """
     _require_aware(hour_start, "hour_start")
     hour = hour_start.astimezone(timezone.utc)
@@ -104,7 +104,7 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime, defer_mirror: lis
     except Exception:
         conn.rollback()
         raise
-    if defer_mirror is not None:
+    if defer_mirror is not None and mirror.clickhouse_url():  # mirror off: nothing to mirror, so hold nothing
         defer_mirror.append((hour, written))
     else:
         mirror.mirror_rows(hour, written)  # best effort, after the commit: never raises, never touches the close
