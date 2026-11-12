@@ -8,7 +8,8 @@
 5. Posts three usage events (201, 201, and a resend answered 200 `duplicate`).
 6. Runs `python -m app.rollup` in the rollup container: it closes every due hour, this one included (the demo checks its own hour is in the output).
 7. Reads the charges for the hour and asserts `total_micros == 6000`
-   (3000 in and 500 out: (3000*1500 + 500*3000) / 1000).
+   (3000 in and 500 out: (3000*1500 + 500*3000) / 1000), no `next_cursor`, and lines that add up to the total (the client rule
+   of [billing.md](billing.md), Paging).
 
 ## Run
 Needs on the host: docker compose v2 (`docker compose`; `up --wait` for the restore recipe below), python3 and curl (the script signs the webhook with python3).

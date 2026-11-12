@@ -38,14 +38,15 @@ has no `entitlements` row: step 8. Next: 3.
 ## 3. What was billed
     curl -s "$BASE/v1/tenants/$T/charges?start=2026-11-10T23:00:00Z&end=2026-11-11T00:00:00Z" -H "X-Tenant-Id: $T"
     {"tenant_id":"demo-1794359437", ... "lines":[{"model":"demo-model","hour_start":"2026-11-10T23:00:00Z","tokens_in":3000,
-     "tokens_out":500,"price_version":1,"micros":6000}],"total_micros":6000,"unclosed_hours":[]}
+     "tokens_out":500,"price_version":1,"micros":6000}],"total_micros":6000,"line_count":1,"next_cursor":null,
+     "unclosed_hours":[],"unclosed_hours_truncated":false}
 One line per hour and model, rated at the price in force at `hour_start`: `(in*in_price + out*out_price + 500) // 1000` per line,
 total = sum of lines (3000*1500 + 500*3000 = 6,000,000, /1000 = 6000). The total is complete only when `unclosed_hours` is `[]`:
 it lists the hours in the range (oldest 100) that hold usage and have no closed rollup row, and those are not in the total:
 
     curl -s "$BASE/v1/tenants/$T/charges?start=2026-11-10T23:00:00Z&end=2026-11-11T03:00:00Z" -H "X-Tenant-Id: $T"
     {... "lines":[{"model":"demo-model","hour_start":"2026-11-10T23:00:00Z", ... "micros":6000}],"total_micros":6000,
-     "unclosed_hours":["2026-11-11T01:00:00Z"]}
+     "line_count":1,"next_cursor":null,"unclosed_hours":["2026-11-11T01:00:00Z"],"unclosed_hours_truncated":false}
 
 `start` and `end` are ISO 8601 text with a time zone (`start=5` is a 422 `must be ISO 8601 text with a time zone, such as
 2026-11-01T00:00:00Z`) and may span at most 366 days (`the range is wider than 366 days: ask for the period in pieces`, 422).
@@ -53,7 +54,7 @@ Without the edge (a denied tenant), from the api container (one Python dict per 
 
     docker compose exec -T api python -c "import sys; from datetime import datetime as d; from app import db, pricing; c = db.connect(); \
     a = [sys.argv[1]] + [d.fromisoformat(x) for x in sys.argv[2:]]; l, t = pricing.charge_lines(c, *a); [print(x) for x in l]; \
-    print('total_micros', t, 'unclosed_hours', [h.isoformat() for h in pricing.unclosed_hours(c, *a)])" $T 2026-11-10T23:00:00+00:00 2026-11-11T03:00:00+00:00
+    print('total_micros', t, 'unclosed_hours', [h.isoformat() for h in pricing.unclosed_hours(c, *a)[0]])" $T 2026-11-10T23:00:00+00:00 2026-11-11T03:00:00+00:00
     {'model': 'demo-model', 'hour_start': datetime.datetime(2026, 11, 10, 23, 0, tzinfo=datetime.timezone.utc), ... 'micros': 6000}
     total_micros 6000 unclosed_hours ['2026-11-11T01:00:00+00:00']
 
@@ -194,7 +195,7 @@ event clears it; a cancel clears it and nothing but a subscription event reopens
 ## 9. The bill total looks too low
     curl -s "$BASE/v1/tenants/$T/charges?start=2026-11-10T19:00:00Z&end=2026-11-10T21:00:00Z" -H "X-Tenant-Id: $T"
     {... "lines":[{"model":"demo-model","hour_start":"2026-11-10T19:00:00Z","tokens_in":500, ... "micros":765}],"total_micros":765,
-     "unclosed_hours":["2026-11-10T20:00:00Z"]}
+     "line_count":1,"next_cursor":null,"unclosed_hours":["2026-11-10T20:00:00Z"],"unclosed_hours_truncated":false}
 Read `unclosed_hours`. `[]`: the bill holds every closed hour; the gap is late events (step 5), a price (step 6) or a missing
 event (step 7). Not empty: the total is partial. An hour that is current or ended less than about 65 minutes ago is normal (due
 5 minutes after it ends, then the hourly loop): ask again later. An older hour that stays in the list is one the rollup cannot

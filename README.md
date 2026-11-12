@@ -63,7 +63,7 @@ reports, the ClickHouse copy and the adapter. Every rule and limit is in [docs/h
 | GET | `/healthz` | 200 `{"status": "ok"}` while the process is up (it says nothing about the database) | none; no edge check |
 | POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 400, 403, 409, 413, 422, 503, 504; edge 401, 402, 503 |
 | POST | `/v1/usage/batch` | 201 `{"accepted", "duplicate", "results": [{idempotency_key, status, event_id, late}]}`, or 200 when every event was already stored; all or nothing, 1 to 1000 events | 400, 403, 409, 413, 422, 503, 504; edge 401, 402, 503 |
-| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503, 504; edge 401, 402, 503 |
+| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, line_count, next_cursor, unclosed_hours, unclosed_hours_truncated}` (`limit`, `cursor` page it: [docs/billing.md](docs/billing.md)) | 403, 409, 422, 503, 504; edge 401, 402, 503 |
 | POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503, 504; no edge check, the signature is the check |
 
 Any route: **404** for an unknown path and **405** for a wrong method.

@@ -30,19 +30,66 @@ after a back-dated `add_price_version` can return a different total. Keep your o
 Charges cover closed hours only. Usage in an hour that has not been rolled up yet (the current hour, and an ended hour for up
 to about 65 minutes: the 5-minute grace plus one run of the hourly rollup loop) is not in `total_micros`. The response says
 which hours those are: `unclosed_hours` lists the hours that start inside the range, hold usage that is not late and have no
-`closed_hours` row (the earliest 100, oldest first, the current hour included; `[]` when nothing is waiting). The total is
-complete only when the list is empty (a list of exactly 100 means at least 100 hours are waiting; there is no flag for the
-cut, because any non-empty list already says the total is partial). This is also how a stuck rollup shows on the bill side: an older hour that stays in the
+`closed_hours` row (the earliest 100, oldest first, the current hour included; `[]` when nothing is waiting).
+`unclosed_hours_truncated` is `true` when there were more than 100 (the list is cut at 100; the flag says so). The total is
+complete only when the list is empty. The list is the same on every page. This is also how a stuck rollup shows on the bill side: an older hour that stays in the
 list long after its 65 minutes is one the rollup cannot close (see the rollup log), and every later hour is billed without it.
 Model names are compared byte for byte: `GPT`, `gpt` and `GPT ` are three models, each needing its own price.
 Status codes: 403 if the caller's tenant is not the path tenant, 422 for naive datetimes, a number instead of ISO text,
-`start >= end`, or a range wider than 366 days (ask for the period in pieces: every row of the range is loaded at once),
+`start >= end`, a range wider than 366 days (ask for the period in pieces), or a paging error (below),
 409 if a row has no price in force: the whole range is refused (no partial bill), and the detail names every unpriced model
 in the range, sorted, with the first hour of each (at most 20, then "and N more"), so all the missing prices can be added in
-one pass. The answer has one line per tenant, model and hour, and no cap on the number of lines is built: the red team
-asked for 366 days of 114 models (about 1M rows) and got a 114 MB body in 3.6 s (RT-operations-11, in [docs/reviews/](reviews/README.md); not repeated here).
-Ask for narrower ranges. The route sits behind `require_entitlement`, so
-the edge can also answer 401, 402 or 503 as in the edge table below.
+one pass; 409 `range changed, restart` under a cursor (below); 504 `query timed out` when the pass runs past the request's
+15 s statement timeout. The route sits behind `require_entitlement`, so the edge can also answer 401, 402 or 503 as in the edge table below.
+
+### Paging
+The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cursor, unclosed_hours, unclosed_hours_truncated}`.
+`total_micros` and `line_count` are the WHOLE range's, on every page.
+- **No `limit`**: all the lines of the range, `next_cursor: null`. If the range holds more than `LINE_CAP` (10,000) lines the answer
+  is 422 `page with limit`, never a 200 with fewer lines.
+- **`limit`** (1 to `MAX_PAGE`, which is `LINE_CAP`): at most that many lines, in `(hour_start, model)` order, and `next_cursor`
+  (opaque text) when more follow, `null` on the last page. Send it back as `cursor` with the same `limit`, tenant, `start` and
+  `end` for the next page. A `cursor` without a `limit` is 422, and so is a malformed one or one made for another tenant or range
+  (`foreign cursor`; the same instant spelled in another UTC offset is the same range). Order is the database's (`model` is
+  compared only in SQL, with the column collation), so `Zebra` follows `apple`.
+- **All or nothing, on every page.** Each request rates every row of the range, so a missing price anywhere is a 409 on page 1,
+  before any line is returned.
+- **The client rule.** Every page reports the whole range's `total_micros` as of its own request (it can differ between requests if hours close meanwhile): never add the totals of the pages (that bills the
+  page count times). Add the `micros` of ALL the lines you hold: it must equal the last page's `total_micros`, and the number of lines
+  must equal its `line_count`; if not, start over from page 1. The service enforces part of this itself: the cursor holds the count
+  and cost of the lines up to it, and a page asked with a cursor whose prefix no longer matches (an hour closed out of order behind
+  the cursor, a price version backdated) is 409 `range changed, restart`. An hour that closes AHEAD of the cursor between two requests
+  is not an error: it comes in a later page and the last page's total includes it, which is what the rule checks. The check
+  compares the count and the sum of `micros` of the lines before the cursor, and nothing more: two changes in that prefix that
+  offset each other (one line up by x, another down by x, for example two backdated price versions) are not detected. The lines
+  the client holds may then be stale line by line, but the total is still the right bill and the client rule still holds.
+  `scripts/demo.sh` and `scripts/scenario.py` apply the rule.
+- **N pages cost N full passes.** The server keeps no state between requests; each page reads and rates the whole range again
+  (constant memory, a server-side cursor, but the CPU is O(range) per page). A client that walks a year of 114 models
+  (about 1M lines) in pages of 10,000 makes about 100 passes over 1M rows. Take large pages, and do not poll.
+- **One snapshot.** The unclosed-hours read, the rows and the prices of one request are read in one repeatable-read transaction.
+  "An hour that closes meanwhile is listed and billed, never neither" holds within a page; across pages the client rule is the check.
+- **Deadline.** The statement timeout is per statement, so a loop of fetches would escape it; the pass checks its own clock and
+  raises the same `QueryCanceled`, answered 504 `query timed out`, once it has run past `REQUEST_STATEMENT_TIMEOUT_MS`.
+- **Why 10,000.** The 114 MB body of a year of 114 models (about 1M rows, RT-operations-11 in [docs/reviews/](reviews/README.md)) is
+  now historical: it can no longer be built. A body of `LINE_CAP` lines is about 1.2 MiB and peaked at about 6 MiB of Python
+  allocations in `tests/test_charges_paging.py` (tracemalloc, one request), so 40 concurrent ones are about 230 MiB; the first page
+  of 1,002,096 rows peaked at under 1 MiB. Numbers of one run on one machine, not a promise.
+- **Time of a pass.** Measured on 2026-11-11 on one development machine (Postgres 16 in docker on the same host), through the real
+  route with `limit` 100, best of 3: a full-year range of 1,002,096 rows (114 models x 366 days) took 2.07 s on the first page and
+  2.06 s on a page near the end of the range (runs of 2.07 to 2.24 s and 2.06 to 2.19 s), about 485,000 rows per second. A page
+  late in the range costs the same as the first, since every page rates every row. The whole pass has one deadline,
+  `REQUEST_STATEMENT_TIMEOUT_MS` (15 s). A range whose pass exceeds it is a 504 `query timed out` on every page, because every
+  page repeats the same pass: the client must then ask for a shorter range. Rows divided by 485,000 gives your range's pass in
+  seconds on a comparable machine (a slower or busier host, or concurrent requests, will be slower), so 15 s corresponds to about
+  7 million rows. The year of 114 models measured here is a seventh of that; a tenant with about 800 models over a year (8,784 rows each) would reach it.
+  One run's figures, not a promise.
+- **Index.** `(tenant_id, hour_start, model)` on `usage_rollups_hourly` was measured and not added. On 1,083,456 rows (114 models x
+  366 days for one tenant plus a month of another), `EXPLAIN (ANALYZE, BUFFERS)` of the whole-year read: without the index a
+  parallel sequential scan plus an external-merge sort (about 48 MB of temporary files in three workers), 557 ms; with it an index scan
+  with no sort, 268 ms. One week (19,152 rows): 30 ms against 18 ms. A full pass in Python over 1,002,096 rows takes about 2.1 s (see "Time of a pass"), so the sort is
+  not what a page waits for, and the index would cost 60 MB (the table is 87 MB) and a write on every hourly close. Revisit when
+  the table holds many tenants' history: the sequential scan reads all of it for any range, and the index would not.
 
 ## Tests
 `DATABASE_URL=... uv run pytest -q tests/test_pricing.py tests/test_pricing_charges.py` (needs Postgres, see `compose.yaml`).
