@@ -94,7 +94,7 @@ def test_a_connection_can_opt_out_of_the_statement_timeout():
 def test_the_rollup_connection_has_no_statement_timeout(conn, monkeypatch):
     seen = []
 
-    def spy(c, now, grace=rollup.DEFAULT_GRACE, failed=None):
+    def spy(c, now, grace=rollup.DEFAULT_GRACE, failed=None, reconnect=None):
         seen.append(c.execute("SHOW statement_timeout").fetchone()["statement_timeout"])
         return []
 

@@ -201,7 +201,8 @@ close: `docker compose logs rollup | grep "rollup failed"`, then step 10. `recon
     2026-11-11 01:12:12,947 ERROR __main__ rollup failed: hour=2026-11-10T20:00:00+00:00 error=NumericValueOutOfRange('bigint out of range')
     rollup: closed 0 hours, failed 1: 2026-11-10T20:00:00+00:00
     exit=1
-A failed hour is rolled back (no `closed_hours` row, no rollup rows), the hours after it still close, the loop logs it again every
+A failed hour is rolled back (no `closed_hours` row, no rollup rows), the hours after it still close (also when the
+failure was a lost database connection: the next hour gets a new one), the loop logs it again every
 cycle and a one-shot run exits 1. The line carries the hour and the database error (some errors quote the failing row, so treat the
 log as tenant data). Find who is in that hour (a sum past 9.2e18 tokens, from events the client dated into it):
 

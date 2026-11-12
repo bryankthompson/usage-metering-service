@@ -58,6 +58,7 @@ These were attacked and held; the test stays because the failure would be silent
 - Ingest racing the hour close, 12 rounds with threads on separate connections: each event is in the closed rollup or
   flagged late, never both, never neither. Rollups run four at once close each hour once.
 - A close whose connection is terminated before commit leaves the hour open; a rerun closes it with the same numbers.
+  A close that loses its connection fails that hour only: the hours after it close on a new connection (`tests/test_rollup_isolation.py`).
 - UTC hour boundaries: 23:59:59.999999Z, 00:00:00Z, half-hour and +14:00 offsets, both US DST changes.
 - Header tenant against body tenant through the real edge (no override): 403 both ways, a refused key is not used up.
 - A rollup sum past BIGINT raises, rolls back and leaves the hour open, as `docs/ingest.md` says.
