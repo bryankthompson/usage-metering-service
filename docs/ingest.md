@@ -187,7 +187,7 @@ holds the shared hour lock would block that hour's close for as long as it stays
   it, so a build that takes longer is cancelled (`QueryCanceled`, checked: nothing is applied, the one transaction rolls back, and the index
   is not left half built). For the first apply on a large table use `db.connect(statement_timeout_ms=0)`, which is what the rollup uses.
 - **The rollup hour-range index (`usage_rollups_hourly_tenant_hour`, `(tenant_id, hour_start, model)`).** The charges read ranges on
-  `hour_start`, and the primary key leads with `model`, so its plan read the tenant's whole key range. Measured (2026-11-12, one
+  `hour_start`, and the primary key puts `model` before `hour_start`, so its plan read the tenant's whole key range. Measured (2026-11-12, one
   machine, Postgres 16 in docker, 501,600 rows for one tenant: 114 models x 4,400 hours): a 1-day range returned 2,736 rows and took 20 ms
   through the primary key (about 4,100 index pages, the whole tenant range) and 1.1 ms through the new index (about 2,750 buffers in all);
   the planner chose a sequential scan of all 501,633 rows (24.5 ms) before the index existed. A 1-week range returned 19,152 rows. Building

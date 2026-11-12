@@ -66,7 +66,7 @@ provider today (`README.md`, "Not built").
 | Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
 | Prices as append-only versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable` in `db/002_billing.sql`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
 | The edge reads the entitlement on its own connection checkout | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement` in `app/edge.py`); the `database_unavailable` handler in `app/main.py` now also answers 503 for a database that dies after the edge check. | One extra short checkout from the bounded connection pool per request (`DB_POOL_MAX`, `docs/ingest.md`). |
-| Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
+| Hand-run live checks instead of a CI stack | The demo and compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI gained a compose smoke test in #75. | CI brings the compose stack up and runs scripts/demo.sh on every pull request and on main (since #75). |
 
 ## 4. A day against a week
 
@@ -79,7 +79,7 @@ the demo and, later, reconcile. A further week would buy the items below. Sizes 
 | Real authentication | The tenant is the `X-Tenant-Id` header; identity needs a decision on who issues credentials. | 2 to 3 | A request with a forged tenant header and a valid credential for another tenant gets 401 or 403 and stores nothing. |
 | Late adjustments | The rule (credit or debit on a later invoice) is not designed. | 3 to 4 | A late event for a closed hour produces one adjustment line on the next period's charges, once, and a resend adds none. |
 | Payment-provider push | Test mode only; needs the pushed-hours table and retry rule. | 3 to 5 | A provider that fails the first call and succeeds the second receives one usage record per hour, identified by its idempotency identifier. |
-| A queue | No load figure exists that shows Postgres alone is not enough. | 3 to 4 | Publish the same event twice and kill the consumer mid-batch: the log holds one row per key. |
+| A queue | The measured throughput table in [docs/ingest.md](ingest.md) gives a baseline for Postgres alone. | 3 to 4 | Publish the same event twice and kill the consumer mid-batch: the log holds one row per key. |
 | A columnar store at scale | The small mirror is built (`docs/clickhouse.md`); no data volume needs it yet. | 4 to 5 | After a dual-written period at volume, `app.reconcile --actuals` against the columnar export exits 0; an altered row exits 1. |
 | A cluster deployment | Compose was enough to demo; manifests would be untested guesses. | 3 to 5 | Kill the API and the rollup pod: both come back, the rollup closes the hour once, `/v1/usage` answers again. |
 | A usage dashboard | No query API over rollups exists (`README.md`, "Not built"). | 3 to 4 | The dashboard totals for an hour equal `total_micros` from the charges route for the same range. |

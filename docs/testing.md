@@ -58,8 +58,11 @@ Then each dev attacked the other's slice. These were found after both, one line 
 | `app/pricing.py` | `add_price_version` silently rounded a float price; the charges route ran one price query per rollup row (10,000 rows took 3.4 s) |
 | `app/edge.py` | a non-ASCII tenant header arrived as mojibake, so that tenant was never admitted |
 
-The review desk is a separate read-only model, not a person. Only the lead session merged, and only with a review of the
-exact head and a green CI (`docs/build-story.md`, "Gates"); the repo records no human approval of a merge.
+The review desk is a separate read-only model, not a person. The lead merged PRs #1 to #52 and #72 to #82, plus #84.
+From 2026-11-11 each dev clone ran as lead of its own lanes and merged #53 to #71 through the same gate. The merge
+command takes a review receipt for the branch or the merging lead's written reason; green CI and a current `main` apply
+to both. Through #84, 69 merges carried a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one
+compose line, a format commit shown AST-equal, a measurement script and a rebase of a head DRC had reviewed at high).
 
 ## 3. What passed and is kept as a guard
 
