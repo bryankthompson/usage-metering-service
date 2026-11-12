@@ -76,12 +76,12 @@ def as_oracle(lines):
     return [{**line, "hour_start": datetime.fromisoformat(line["hour_start"])} for line in lines]
 
 
-def walk(client, params, limit):
+def walk(client, params, limit, path=PATH):
     """Every page of the range: (all lines, the pages' bodies). Each page must be a full 200 and agree on the whole-range numbers."""
     lines, pages, cursor = [], [], None
     while True:
         query = {**params, "limit": limit, **({"cursor": cursor} if cursor else {})}
-        resp = client.get(PATH, params=query)
+        resp = client.get(path, params=query)
         assert resp.status_code == 200, resp.text
         body = resp.json()
         pages.append(body)

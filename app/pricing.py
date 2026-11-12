@@ -250,7 +250,7 @@ def charge_page(conn: psycopg.Connection, tenant_id: str, start: datetime, end: 
 
 def encode_cursor(tenant_id: str, start: datetime, end: datetime, cursor: Cursor) -> str:
     """Opaque text for the client; not signed, it holds nothing secret and a change to it is caught by the counts."""
-    body = {"t": tenant_id, "s": _utc_text(start), "e": _utc_text(end), "h": _utc_text(cursor.hour_start), "m": cursor.model,
+    body = {"t": tenant_id, "s": _offset_text(start), "e": _offset_text(end), "h": _offset_text(cursor.hour_start), "m": cursor.model,
             "n": cursor.count_before, "u": cursor.micros_before}
     return base64.urlsafe_b64encode(json.dumps(body, separators=(",", ":")).encode()).decode()
 
@@ -289,8 +289,11 @@ CURSOR_FIELDS = ("t", "s", "e", "h", "m", "n", "u")
 CURSOR_MAX_LENGTH = 8192
 
 
-def _utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+def _offset_text(value: datetime) -> str:
+    """The aware value as it was received, with its own offset. Not converted to UTC: `astimezone` overflows for an instant
+    whose UTC date is outside year 1 to 9999 (`9999-12-31T23:59:59-05:00`), a range the route accepts. The reader compares
+    instants, so the same instant in another offset is the same range."""
+    return value.isoformat()
 
 
 MAX_RANGE = timedelta(days=366)           # a wider range is refused: ask for the period in pieces
