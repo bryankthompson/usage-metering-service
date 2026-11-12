@@ -220,6 +220,11 @@ with the same numbers and `closed hour=...` prints:
     closed hour=2026-11-10T19:00:00+00:00 rows=1 events=1
     rollup: closed 1 hours, failed 1: 2026-11-10T20:00:00+00:00      (exit 1 while any hour still fails)
 
+With `CLICKHOUSE_URL` set, the optional ClickHouse copy is made after all due hours are closed, and the first failure that
+means ClickHouse is down skips the copy of the hours after it. `grep "clickhouse mirror"` shows `failed: hour=...` (the one that
+met the failure) and `skipped: hour=... after an earlier failure in this pass`. Neither fails a close or changes the exit code;
+`python -m app.mirror --backfill` recovers those hours (docs/clickhouse.md). The bill is the Postgres rollup.
+
 ## 11. Clients get 503, some with Retry-After
     curl -s -i "$BASE/v1/tenants/$T/charges?start=2026-11-10T23:00:00Z&end=2026-11-11T00:00:00Z" -H "X-Tenant-Id: $T"
     docker compose ps -a db ; docker compose logs api | grep -E "edge cannot read|unavailable"

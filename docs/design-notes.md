@@ -24,8 +24,8 @@ the shared hour lock taken by the consumer (`lock_hour_shared`, `app/ingest.py:1
 run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
-**A columnar store for rollups at scale (BUILT as an optional mirror, not at scale).** After `close_hour` commits (`conn.commit()`,
-`app/rollup.py`) the same rows are written to ClickHouse when `CLICKHOUSE_URL` is set (`app/mirror.py`, `docs/clickhouse.md`). The log
+**A columnar store for rollups at scale (BUILT as an optional mirror, not at scale).** After the hours are committed (`conn.commit()` in `close_hour`;
+`close_due_hours` mirrors them in one pass after closing all of them, `app/rollup.py`) the same rows are written to ClickHouse when `CLICKHOUSE_URL` is set (`app/mirror.py`, `docs/clickhouse.md`). The log
 stays the source and the Postgres rollup stays the bill. Limits: a derived copy, best effort at close time (a failure is logged and
 never touches the close), recovered by `python -m app.mirror --backfill`, no authentication on the local ClickHouse, single node.
 Comparison: `--export-actuals` writes the totals as the file `app.reconcile --actuals` reads; drift above tolerance exits 1. Not
@@ -33,8 +33,10 @@ built: any run at data volumes where the columnar store matters, a schedule for 
 
 **Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
 `restart: unless-stopped` (`compose.yaml:15-20`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
-(`compose.yaml:22-34`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:36-44`).
-Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:49-55`). The API answers 503 on
+(`compose.yaml:22-39`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:41-51`).
+`db` and `api` have a health check; `rollup` has none. The `api` one (`compose.yaml:34-38`) fetches `GET /healthz` from inside the
+container every 2 s (up to 30 retries), so `docker compose up --wait` returns when the API answers, not when its process starts;
+`/healthz` does not touch the database (`app/main.py:49-55`). The API answers 503 on
 every route that uses the database when it is unreachable; `/healthz` does not touch it and keeps answering 200
 (`app/main.py:39-47,49-55`). It also answers 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at

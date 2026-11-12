@@ -23,12 +23,22 @@ microseconds) wins. A background merge does the replacing, and it is lazy, so a 
 new row: query with `FINAL` (the mirror's own reads do). Sums over a `FINAL` read do not double count.
 
 ## When it writes, and when that fails
-`close_hour` commits to Postgres first. Then, if `CLICKHOUSE_URL` is set, it creates the table if needed and sends that hour's
-rollup rows in one `INSERT ... FORMAT JSONEachRow` (5 second timeout). Any failure (refused connection, timeout, a non-2xx answer)
-is logged at ERROR as `clickhouse mirror failed: hour=<iso> error=...` and changes nothing else: the close is not rolled back and
-does not fail, and `app.rollup` exits as before. The hour then stays missing in ClickHouse until `python -m app.mirror --backfill`
+`close_hour` commits to Postgres first. `app.rollup` (`close_due_hours`) closes every due hour first, oldest first, and only then
+mirrors the hours it closed, in one pass after the loop, so a ClickHouse that does not answer cannot slow the closing of the
+hours (a direct `close_hour` call still mirrors right after its own commit). If `CLICKHOUSE_URL` is set, each hour creates the table
+if needed and sends that hour's rollup rows in one `INSERT ... FORMAT JSONEachRow` (5 second timeout per request). Any failure
+(refused connection, timeout, a non-2xx answer) is logged at ERROR as `clickhouse mirror failed: hour=<iso> error=...` and changes
+nothing else: the close is not rolled back and does not fail, and `app.rollup` exits as before.
+
+In the pass, the first failure that means ClickHouse is unreachable or too slow (refused, timeout, `OSError`) skips the mirror
+writes of the hours after it, so a dead ClickHouse costs one timeout per run, not one per hour. Each skipped hour is logged at ERROR
+as `clickhouse mirror skipped: hour=<iso> after an earlier failure in this pass`. An error answer for one hour's rows (ClickHouse
+is up and refuses them, or the hour is out of range) does not stop the other hours.
+
+A failed or skipped hour stays missing in ClickHouse until `python -m app.mirror --backfill`
 reads every closed rollup row from Postgres, compares it with ClickHouse (`FINAL`) and re-sends each hour with any missing or
-different row (the whole hour). It is idempotent, prints `mirror: sent N hours, failed M`, and exits 1 if any hour still fails or
+different row (the whole hour). The comparison needs the mirror's whole state, so `--backfill` does one full `FINAL` read of the
+table and groups the Postgres rows once by hour; that full read stays. It is idempotent, prints `mirror: sent N hours, failed M`, and exits 1 if any hour still fails or
 ClickHouse cannot be reached.
 
 ## Checking it
@@ -42,7 +52,7 @@ catches rows that exist only in ClickHouse, which `--backfill` does not look at 
   the range is not written (ClickHouse would wrap it silently): the close logs `clickhouse mirror failed`, and `--backfill` fails on it
   every run and exits 1. The Postgres rollup and the bill are unaffected.
 - A derived copy, not the bill; late events are never in it, as in the Postgres rollup.
-- Best effort at close time, recovered by `--backfill` (run it by hand or from cron; nothing schedules it).
+- Best effort after the close pass, recovered by `--backfill` (run it by hand or from cron; nothing schedules it).
 - No authentication on the local ClickHouse (`CLICKHOUSE_SKIP_USER_SETUP`, port on 127.0.0.1 only), single node, no replication, no TLS.
 - Nothing deletes from ClickHouse. The tests use a stand-in HTTP server (`tests/test_mirror.py`); the real server was run by hand
   once (the commands above), not in CI, and not at scale.

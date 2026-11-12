@@ -16,11 +16,11 @@ NOW = at("2026-11-10T12:00:00Z")
 def poison_hour_8(monkeypatch):
     real = close_hour
 
-    def flaky(conn, hour):
+    def flaky(conn, hour, **kw):
         if hour == POISON:
             conn.execute("SELECT 1")  # leave a transaction open, as a real failure would
             raise RuntimeError("boom")
-        return real(conn, hour)
+        return real(conn, hour, **kw)
 
     monkeypatch.setattr(rollup, "close_hour", flaky)
 
@@ -124,12 +124,12 @@ def kill_connection_of_hour_8(monkeypatch, victim_hour=POISON):
     """Close for `victim_hour` (default 8) loses its connection (terminated from the server side) mid-close."""
     real = close_hour
 
-    def killed(conn, hour):
+    def killed(conn, hour, **kw):
         if hour == victim_hour:
             conn.execute("SELECT 1")
             with db.connect() as killer:
                 killer.execute("SELECT pg_terminate_backend(%s)", (conn.info.backend_pid,))
-        return real(conn, hour)
+        return real(conn, hour, **kw)
 
     monkeypatch.setattr(rollup, "close_hour", killed)
 

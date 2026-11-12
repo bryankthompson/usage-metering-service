@@ -166,7 +166,7 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - The reviewers are models too: DRC, the advisor and the red-team lanes. Apart from the five functions the operator read
   (section 8), every review of this code was done by a model. They found real defects and also missed some. The high-effort
   review of the entitlements slice missed the grace-window slide that dev A found by reading.
-- The platform adapter has not run against the real service. No key existed, so no call was made. It was tested
+- The platform adapter (`seekrflow`) has not run against the real service. No key existed, so no call was made. It was tested
   against fixtures and a stand-in server only.
 - There is no load test beyond `scripts/flood.py` (600 requests from 150 clients), and a few one-off red-team measurements.
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
@@ -185,8 +185,10 @@ changed what was built.
 - **How the work is checked.** Independent review and a green CI check on every merge, and the repo was private while it
   was built; it was made public on 2026-11-10. The operator also said that the way the sessions work together is part of
   what the build is meant to show, so the build log is kept as it happens.
-- **What the platform adapter may be.** It is named only in its own files, it runs on hand-written fixtures because there was no
-  API key, and no live call is ever claimed (build log 17:20).
+- **What the platform adapter may be.** It runs on hand-written fixtures because there was no API key, and no live call is ever
+  claimed (build log 17:20). Until 2026-11-11 its name, `seekrflow`, was kept to its own files (`app/seekrflow.py`,
+  `tests/test_seekrflow.py`, `docs/seekrflow.md`). On 2026-11-11 the operator decided to name it everywhere; the adapter is still
+  tested only against fixtures and a stand-in server, and no call to the real service has been made.
 - **The bar at the end (17:20).** The build should use the platform of the people it is for, have a way to be tested, be
   robust, and be attacked by adversarial agents at the final review. That became the adapter, the testing guide and the red-team
   lanes.
