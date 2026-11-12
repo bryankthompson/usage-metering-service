@@ -59,8 +59,11 @@ The answer is `{tenant_id, start, end, lines, total_micros, line_count, next_cur
   must equal its `line_count`; if not, start over from page 1. The service enforces part of this itself: the cursor holds the count
   and cost of the lines up to it, and a page asked with a cursor whose prefix no longer matches (an hour closed out of order behind
   the cursor, a price version backdated) is 409 `range changed, restart`. An hour that closes AHEAD of the cursor between two requests
-  is not an error: it comes in a later page and the last page's total includes it, which is what the rule checks. `scripts/demo.sh`
-  and `scripts/scenario.py` apply the rule.
+  is not an error: it comes in a later page and the last page's total includes it, which is what the rule checks. The check
+  compares the count and the sum of `micros` of the lines before the cursor, and nothing more: two changes in that prefix that
+  offset each other (one line up by x, another down by x, for example two backdated price versions) are not detected. The lines
+  the client holds may then be stale line by line, but the total is still the right bill and the client rule still holds.
+  `scripts/demo.sh` and `scripts/scenario.py` apply the rule.
 - **N pages cost N full passes.** The server keeps no state between requests; each page reads and rates the whole range again
   (constant memory, a server-side cursor, but the CPU is O(range) per page). A client that walks a year of 114 models
   (about 1M lines) in pages of 10,000 makes about 100 passes over 1M rows. Take large pages, and do not poll.
