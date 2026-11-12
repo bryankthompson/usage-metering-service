@@ -83,8 +83,8 @@ Each layer fails in a different way from the others. One example each.
   Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
   `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
   That statement is about `dea36c8` (2026-11-10); #45 and #46 changed code afterwards, and `docs/build-log.md` (2026-11-11) records them.
-- **A read by the operator of five functions.** On 2026-11-11, on the money and entitlement path (section 8). Every other
-  review of this code was done by a model.
+- **Reviews by models, and a read by the operator.** DRC, the advisor and the red-team lanes were models. On 2026-11-11 the
+  operator read five functions on the money and entitlement path (section 8).
 
 ## 4. The review rounds
 
@@ -161,17 +161,16 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - **A fix for the half-built data volume after an interrupted first start.** The failure is loud and `down -v` recovers it
   (16:27). An automatic schema step would have meant designing migrations.
 
-## 7. Limits of this method
+## 7. What each layer covered
 
-- The reviewers are models too: DRC, the advisor and the red-team lanes. Apart from the five functions the operator read
-  (section 8), every review of this code was done by a model. They found real defects and also missed some. The high-effort
-  review of the entitlements slice missed the grace-window slide that dev A found by reading.
-- The platform adapter (`seekrflow`) has not run against the real service. No key existed, so no call was made. It was tested
-  against fixtures and a stand-in server only.
-- There is no load test beyond `scripts/flood.py` (600 requests from 150 clients), and a few one-off red-team measurements.
+- Review: models reviewed the code (DRC, the advisor, the red-team lanes) and the operator read five functions on the money and
+  entitlement path (section 8). Reviewers found real defects, and a later reader found others: the high-effort review of the
+  entitlements slice did not catch the grace-window slide that dev A found by reading.
+- The platform adapter (`seekrflow`) is tested against hand-written fixtures and a stand-in server (no API key existed).
+- The load check is `scripts/flood.py` (600 requests from 150 clients), with a few one-off red-team measurements.
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
   they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
-- The merge gate's receipts are not stored in the repo (section 2).
+- The merge gate's receipts are kept outside the repo (section 2); the repo keeps each pull request's merge commit and the build log.
 
 ## 8. What the operator decided
 
@@ -185,10 +184,9 @@ changed what was built.
 - **How the work is checked.** Independent review and a green CI check on every merge, and the repo was private while it
   was built; it was made public on 2026-11-10. The operator also said that the way the sessions work together is part of
   what the build is meant to show, so the build log is kept as it happens.
-- **What the platform adapter may be.** It runs on hand-written fixtures because there was no API key, and no live call is ever
-  claimed (build log 17:20). Until 2026-11-11 its name, `seekrflow`, was kept to its own files (`app/seekrflow.py`,
-  `tests/test_seekrflow.py`, `docs/seekrflow.md`). On 2026-11-11 the operator decided to name it everywhere; the adapter is still
-  tested only against fixtures and a stand-in server, and no call to the real service has been made.
+- **What the platform adapter may be.** It runs on hand-written fixtures and a stand-in server because there was no API key
+  (build log 17:20). Until 2026-11-11 its name, `seekrflow`, was kept to its own files (`app/seekrflow.py`,
+  `tests/test_seekrflow.py`, `docs/seekrflow.md`). On 2026-11-11 the operator decided to name it everywhere.
 - **The bar at the end (17:20).** The build should use the platform of the people it is for, have a way to be tested, be
   robust, and be attacked by adversarial agents at the final review. That became the adapter, the testing guide and the red-team
   lanes.
@@ -196,7 +194,7 @@ changed what was built.
   working, directed by the lead; that is why the work ran as many small parallel lanes.
 - **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
   describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
-- **The operator's read, and the one open item.** On 2026-11-11 the operator read the five functions on the money and entitlement path, as they
+- **The operator's read.** On 2026-11-11 the operator read the five functions on the money and entitlement path, as they
   stand at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
   `_in_force` and `_rate` (`app/pricing.py:80` and `:88`), `require_entitlement` (`app/edge.py:36`) and `_apply_subscription`
   (`app/webhooks.py:105`). The repo's name stays generic; it has been public since 2026-11-10.

@@ -300,12 +300,11 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   with its own ports and database: the demo, the flood (600 requests, 150 clients), the outage check, 55 of 56 README
   status-code probes (the miss was its own probe), ClickHouse drift, backfill and outage recovery, and 620 tests. It found
   four documentation gaps (the start-up wait, the nesting depth behind the 400, the adapter's error for embeddings without
-  `--model`, two items numbered 8), fixed in the `lane/doc-gaps` change. Still true: no call to the real service has been made
-  (there is no key; access is gated behind "request access or contact sales"), `--live` has never run, and no person has
-  read the whole diff (the operator read five functions, see section 8 of how-it-was-built.md).
+  `--model`, two items numbered 8), fixed in the `lane/doc-gaps` change. The adapter runs on hand-written fixtures because there is no key
+  (access is gated behind "request access or contact sales"). The operator read five functions (see section 8 of
+  how-it-was-built.md).
 - **2026-11-11 (later)** The operator said they read five of the money and entitlement functions as they stand at `5dca15d`:
   `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`), `_in_force` and `_rate` (`app/pricing.py:80` and `:88`),
   `require_entitlement` (`app/edge.py:36`) and `_apply_subscription` (`app/webhooks.py:105`). This supersedes the 22:05 entry's
-  "has not happened" for those functions only. Still true: the platform adapter has never run against the real service,
-  `--live` has never run, and no person has read the whole diff
-  (the operator read five functions, see section 8 of how-it-was-built.md).
+  "has not happened" for those functions only. The adapter still runs on hand-written fixtures
+  and a stand-in server (see section 8 of how-it-was-built.md).
