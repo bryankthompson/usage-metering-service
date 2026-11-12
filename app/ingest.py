@@ -129,6 +129,8 @@ def ingest_usage(
         # free worker thread, so a burst of requests used up Postgres's connection slots.
         with db.connect() as conn:
             return _store(event, response, tenant, conn)
+    except psycopg.errors.QueryCanceled:  # a statement past the timeout: the handler in app/main.py answers 504
+        raise
     except psycopg.OperationalError as err:  # database down or dropped part way: the same key is safe to resend
         raise _unavailable(err) from err
 

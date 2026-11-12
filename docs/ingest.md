@@ -118,7 +118,7 @@ holds the shared hour lock would block that hour's close for as long as it stays
   finishes. Applying the schema again afterwards does nothing. Not measured: the build time on a large table.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
-so a database that stops accepting connections, or answers slowly, is a 503. `/healthz` is an `async` route that touches
+so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on every route after the entitlement edge (the edge answers 503 for its own read; `POST /v1/usage` re-raises it to the handler in `app/main.py`). A lock wait over 2 s and a failed connection stay 503. `/healthz` is an `async` route that touches
 nothing, so it keeps answering while every worker thread is busy; it shows that the process is up and its event loop
 answers, not that the database does.
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the

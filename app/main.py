@@ -46,6 +46,16 @@ def create_app() -> FastAPI:
         log.error("database unavailable: %s %s: %s", request.method, request.url.path, exc)
         return JSONResponse(status_code=503, content={"detail": "database unavailable"}, headers={"Retry-After": "1"})
 
+    @app.exception_handler(psycopg.errors.QueryCanceled)
+    async def query_timed_out(request: Request, exc: psycopg.errors.QueryCanceled) -> JSONResponse:
+        """A statement past the request-path statement timeout is 504, not "database unavailable": the database is up.
+
+        No Retry-After: the same query would time out again. Starlette picks the handler nearest in the exception's MRO,
+        so this wins over the OperationalError one; a lock timeout and a failed connection stay 503.
+        """
+        log.error("query timed out: %s %s: %s", request.method, request.url.path, exc)
+        return JSONResponse(status_code=504, content={"detail": "query timed out"})
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         """Runs on the event loop, not in the thread pool the database routes share, so it answers while they are all parked.
