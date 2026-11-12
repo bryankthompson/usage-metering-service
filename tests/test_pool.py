@@ -126,15 +126,17 @@ def test_200_concurrent_requests_never_open_more_sessions_than_the_cap(api, conn
     watcher = threading.Thread(target=sample)
     watcher.start()
     try:
-        with TestClient(app, raise_server_exceptions=False) as shared, ThreadPoolExecutor(max_workers=60) as senders:
-            sends = [senders.submit(post, shared, f"k{i}") for i in range(200)]
-            statuses = [s.result(timeout=DEADLINE_S).status_code for s in sends]
+        try:
+            with TestClient(app, raise_server_exceptions=False) as shared, ThreadPoolExecutor(max_workers=60) as senders:
+                sends = [senders.submit(post, shared, f"k{i}") for i in range(200)]
+                statuses = [s.result(timeout=DEADLINE_S).status_code for s in sends]
+        finally:
+            done.set()
+            watcher.join()
+        pooled = sampler.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s",
+                                 (db.APPLICATION_NAME,)).fetchone()["n"]
     finally:
-        done.set()
-        watcher.join()
-    pooled = sampler.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s",
-                             (db.APPLICATION_NAME,)).fetchone()["n"]
-    sampler.close()
+        sampler.close()
     assert statuses == [201] * 200
     assert 1 <= peak[0] <= cap, f"{peak[0]} sessions at the peak with a cap of {cap}"
     assert pooled <= cap
@@ -248,7 +250,8 @@ class Proxy:
         self.listener.bind(("127.0.0.1", self.port))
         self.listener.listen(64)
         self.running = True
-        threading.Thread(target=self._accept, args=(self.listener,), daemon=True).start()
+        self.acceptor = threading.Thread(target=self._accept, args=(self.listener,), daemon=True)
+        self.acceptor.start()
 
     def _accept(self, listener):
         while True:
@@ -277,7 +280,13 @@ class Proxy:
 
     def stop(self):
         self.running = False
+        try:
+            self.listener.shutdown(socket.SHUT_RDWR)      # close() alone leaves a blocked accept() holding the port
+        except OSError:
+            pass
         self.listener.close()
+        self.acceptor.join(timeout=5)
+        assert not self.acceptor.is_alive(), "the proxy's accept thread did not stop"
         for s in self.sockets:
             try:
                 s.shutdown(socket.SHUT_RDWR)

@@ -2,6 +2,7 @@
 the rollup, reconcile, delinquent and mirror jobs and the tests open and close their own (`connect`)."""
 import atexit
 import logging
+import math
 import os
 import threading
 from contextlib import contextmanager
@@ -75,8 +76,8 @@ def _env_number(name: str, default: float, kind: type) -> float:
         value = kind(raw)
     except ValueError:
         raise ValueError(f"{name}={raw!r} is not a number") from None
-    if value <= 0:
-        raise ValueError(f"{name}={raw!r} must be greater than 0")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name}={raw!r} must be a finite number greater than 0")
     return value
 
 
