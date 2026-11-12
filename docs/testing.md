@@ -51,7 +51,7 @@ Then each dev attacked the other's slice. These were found after both, one line 
 | `app/edge.py` | a non-ASCII tenant header arrived as mojibake, so that tenant was never admitted |
 
 The review desk is a separate read-only model, not a person. Only the lead session merged, and only with a review of the
-exact head and a green CI (README, "Gates"); the repo records no human approval of a merge.
+exact head and a green CI (`docs/build-story.md`, "Gates"); the repo records no human approval of a merge.
 
 ## 3. What passed and is kept as a guard
 
@@ -103,7 +103,7 @@ These were attacked and held; the test stays because the failure would be silent
 | Known limit (found, not fixed) | Where it is written down |
 |--|--|
 | The rollup sum is BIGINT: past 9.2e18 tokens that hour's close fails (logged as `rollup failed: hour=...`, nothing written) and the hour stays unclosed; later hours still close | `docs/ingest.md` Known limit; README Not built |
-| The append-only trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger) | `docs/ingest.md` (first paragraph); README section 2 |
+| The append-only trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger) | `docs/ingest.md` (first paragraph); `docs/how-it-works.md` part 2 |
 | An hour with events closes for every tenant once it is 5 minutes old, so one tenant's event in an old quiet hour makes other tenants' later events for it late (stored, never billed) | here only (late events: `docs/ingest.md`) |
 | No real authentication; with repeated `X-Tenant-Id` headers the edge takes the first (by reading the code, and a one-line run of Starlette's `Headers.get`; the test accepts either tenant) | README Not built; `app/edge.py` docstring |
 | Nothing binds a tenant to one customer id. A tenant id the edge can never admit (leading space or tab, control characters) is refused for new events (`_tenant_id` in `app/webhooks.py`); a row stored before that rule still gets its later events, matched by its exact id | here only (one customer per tenant: `docs/billing.md`) |

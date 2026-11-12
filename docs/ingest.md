@@ -59,7 +59,7 @@ to commit; `close_hour` takes the exclusive lock for the hour before it reads an
 `closed hour=... rows=N events=N` per closed hour, or `nothing due`. A close runs with no statement timeout.
 Compose runs it as the `rollup` service (`--every 3600`).
 
-**Tests:** `uv run pytest -q tests/test_rollup.py`. The lock tests hold one side's lock by hand and
+**Tests:** `uv run pytest -q tests/test_rollup.py tests/test_due_hours.py` (the second compares `DUE_HOURS` with the old query and guards its plan). The lock tests hold one side's lock by hand and
 check the other side waits.
 
 **Does not do:** reconciliation, pushing usage to Stripe, a query API over rollups, a queue.
@@ -89,8 +89,36 @@ attempt, on every cycle (`close_hour` takes the lock first), so ingests for that
 holds the shared hour lock would block that hour's close for as long as it stays open (the closing side has no timeout:
 `test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight`), and no `idle_in_transaction_session_timeout` is set.
 
+**Query cost (measured 2026-11-11, Postgres 16 in a docker container on a WSL2 laptop; times move with the machine, the plans and row counts do not).**
+- **Which hours are due (`DUE_HOURS`).** The old query wrapped `occurred_at` in `date_trunc` in both predicates, so no index could serve it:
+  on 1.2M events over 3,001 hours (6 of them open) it was a Seq Scan reading all 1.2M rows, 647 ms. The review's proposed extra
+  `AND occurred_at < cutoff` did not help: nearly every event is older than the cutoff, the plan stayed the same Seq Scan, 655 ms. The
+  query is now a recursive CTE that walks the hours that have events: from one hour, the first event at or after the next hour boundary
+  (one probe of the `(occurred_at)` index) names the next hour, and each hour is checked against `closed_hours`. Same plan on the
+  same data: 3,001 index probes, 27 ms (24 times faster), the same 6 hours. The cost grows with the number of hours that have events
+  (closed ones included, because an unclosed hour can be anywhere in the past), not with the number of events. A test compares it with the old query over
+  hour boundaries, the cutoff +/- 1 microsecond, non-UTC offsets, closed and out-of-order hours, late events, two tenants, year 1 and
+  year 9999, and another asserts the plan reads at most about one event per hour (`tests/test_due_hours.py`).
+  A row with `occurred_at` `infinity` or `-infinity` (the schema allows it, the API refuses it) cannot make the walk loop: every step must move forward.
+  `infinity` is ignored, as before; `-infinity` is still returned as a due hour, as before, and `close_due_hours` then stops with a psycopg `DataError`
+  (the driver cannot load it as a datetime), a loud failure, not a hang.
+- **Unclosed hours on a charges call (`UNCLOSED_HOURS`, `app/pricing.py`).** The index `usage_events_tenant_occurred_at` on `(tenant_id, occurred_at)`
+  serves its `tenant_id = X AND occurred_at in range` filter. Same data, 20 tenants, warm cache: a 30-day range took 33 ms before (an
+  `(occurred_at)` index scan that filtered 298,000 rows) and 13 ms after (a bitmap scan of that tenant's rows). A 1-day range took 1.3 ms
+  both ways, so the index pays when the range is wide or there are many tenants, not for a short range. The gain grows with the number of tenants; it was measured with 20.
+- **What the index costs.** One more btree write on every ingest. 10,000 single-row inserts into a table of 1.2M rows, three rounds each, median:
+  209 microseconds with the index and 189 without (+20 microseconds, about 10 %) with `synchronous_commit = off`, which isolates the CPU
+  cost. With the default `synchronous_commit = on` each insert waits for a disk flush (about 7 ms here) and the run-to-run spread
+  (50 to 86 s per 10,000) was larger than the difference (74.1 s with, 69.2 s without), so that run shows no cost that can be told apart from the noise.
+- **The `(occurred_at)` index stays.** Both queries use it: `AGGREGATE_HOUR` on one 400-event hour of that data is an Index Scan using
+  `usage_events_occurred_at` (0.18 ms), and the new `DUE_HOURS` probes it once per hour.
+- **Building the index on an existing table.** `apply_schema` runs every `db/*.sql` in one transaction, so the statement is
+  `CREATE INDEX IF NOT EXISTS`, not `CONCURRENTLY`. On a database that already holds a large `usage_events`, the first start after this change takes
+  a write lock on that table while the index builds, so ingests wait (a 2 s lock wait then answers 503, see the timeouts below) until it
+  finishes. Applying the schema again afterwards does nothing. Not measured: the build time on a large table.
+
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
-so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on the routes whose database error reaches the handler in `app/main.py` (the charges and webhook routes; `POST /v1/usage` still answers 503). `/healthz` is an `async` route that touches
+so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on every route after the entitlement edge (the edge answers 503 for its own read; `POST /v1/usage` re-raises it to the handler in `app/main.py`). A lock wait over 2 s and a failed connection stay 503. `/healthz` is an `async` route that touches
 nothing, so it keeps answering while every worker thread is busy; it shows that the process is up and its event loop
 answers, not that the database does.
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the

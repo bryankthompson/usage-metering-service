@@ -235,7 +235,7 @@ retrying, because they queue for a worker thread; a stopped db answered in 4.0 s
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
 `{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s or the db dying mid-request (a statement over
-15 s is 504 `{"detail":"query timed out"}` without `retry-after` on the charges and webhook routes, `app/main.py`; `POST /v1/usage` still answers 503 for it; not run here). Nothing of the failed attempt was stored, so the same request can be
+15 s is 504 `{"detail":"query timed out"}` without `retry-after` on every route after the entitlement edge, including `POST /v1/usage` (`app/main.py`); covered by `tests/test_db_timeouts.py` with a real `pg_sleep`, not run against a compose stack). Nothing of the failed attempt was stored, so the same request can be
 resent. A held lock shows in the log and in the database (the usage request waited 2.02 s):
 
     ERROR:    usage unavailable: canceling statement due to lock timeout
@@ -278,8 +278,8 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | Customer says usage is lower than billed | two keys for one call, or the wrong price version | 7, 6 |
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
-| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying (on `/v1/usage` also a statement over 15 s) | 11 |
-| 504 `query timed out`, no `retry-after` | a statement over 15 s on the charges or webhook route | 11 |
+| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying | 11 |
+| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included | 11 |
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |
