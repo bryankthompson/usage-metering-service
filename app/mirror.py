@@ -1,7 +1,8 @@
 """A derived copy of the closed hourly rollups in ClickHouse, over its HTTP interface (urllib, no new dependency).
 
-The Postgres rollup stays the bill and the append-only log stays the source. `rollup.close_hour` calls `mirror_rows`
-after its commit when `CLICKHOUSE_URL` is set; a failure there is logged and never touches the close. `--backfill`
+The Postgres rollup stays the bill and the append-only log stays the source. When `CLICKHOUSE_URL` is set, `rollup.close_hour`
+calls `mirror_rows` after its commit, and `rollup.close_due_hours` closes every due hour first and then calls `mirror_hours`
+once for all of them; a failure there is logged and never touches the close. `--backfill`
 copies every closed hour that is missing or different in ClickHouse; `--export-actuals FILE` writes ClickHouse's totals as
 the JSON lines file `python -m app.reconcile --actuals` reads. See docs/clickhouse.md.
 
@@ -121,6 +122,30 @@ def mirror_rows(hour: datetime, rows: list[dict]) -> bool:
     return True
 
 
+def mirror_hours(closed: list[tuple[datetime, list[dict]]]) -> None:
+    """Best effort, one pass over hours already committed (oldest first). Never raises.
+
+    The first failure that means ClickHouse is unreachable or too slow (refused, timeout, `OSError`) skips the rest of
+    the pass, so a dead ClickHouse costs one timeout, not one per hour; each skipped hour is logged at ERROR and
+    `--backfill` recovers it. An answer from ClickHouse that refuses one hour's rows does not stop the others.
+    """
+    url = clickhouse_url()
+    if url is None:
+        return
+    down = False
+    for hour, rows in closed:
+        if down:
+            log.error("clickhouse mirror skipped: hour=%s after an earlier failure in this pass", _utc(hour).isoformat())
+            continue
+        try:
+            write_rows(url, rows)
+        except (OSError, http.client.HTTPException) as err:  # URLError and timeouts are OSError
+            log.error("clickhouse mirror failed: hour=%s error=%r", _utc(hour).isoformat(), err)
+            down = True
+        except Exception as err:
+            log.error("clickhouse mirror failed: hour=%s error=%r", _utc(hour).isoformat(), err)
+
+
 def read_mirror(url: str) -> dict[tuple, tuple[int, int, int]]:
     """Every (tenant, model, hour) in ClickHouse with its (tokens_in, tokens_out, event_count), duplicates collapsed."""
     query = (f"SELECT tenant_id, model, toUnixTimestamp(hour_start) AS ts, tokens_in, tokens_out, event_count "
@@ -145,14 +170,17 @@ def backfill(conn, url: str) -> tuple[int, list[datetime]]:
     rows = conn.execute(CLOSED_ROLLUPS).fetchall()
     conn.commit()
     mirrored = read_mirror(url)
-    by_hour: dict[datetime, list[dict]] = {}
+    rows_of: dict[datetime, list[dict]] = {}  # every row of each hour, grouped once
+    differs = set()
     for row in rows:
+        hour = _utc(row["hour_start"])
+        rows_of.setdefault(hour, []).append(row)
         if mirrored.get(_row_key(row)) != _row_values(row):
-            by_hour.setdefault(_utc(row["hour_start"]), []).append(row)
+            differs.add(hour)
     sent, failed = 0, []
-    for hour, hour_rows in sorted(by_hour.items()):
+    for hour in sorted(differs):
         try:
-            write_rows(url, [r for r in rows if _utc(r["hour_start"]) == hour])  # the whole hour, so a half-written hour is whole
+            write_rows(url, rows_of[hour])  # the whole hour, so a half-written hour is whole
         except Exception as err:
             log.error("clickhouse mirror failed: hour=%s error=%r", hour.isoformat(), err)
             failed.append(hour)
