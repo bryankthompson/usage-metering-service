@@ -274,7 +274,7 @@ def decode_cursor(text: str, tenant_id: str, start: datetime, end: datetime) -> 
         body["m"].encode("utf-8")
         if not 1 <= len(body["m"]) <= MAX_TEXT or "\x00" in body["m"]:
             raise ValueError("bad model")
-    except (ValueError, TypeError) as err:                  # binascii.Error, UnicodeError and JSONDecodeError are ValueErrors
+    except (ValueError, TypeError, RecursionError) as err:  # binascii.Error, UnicodeError, JSONDecodeError are ValueErrors; deep nesting is RecursionError
         raise ValueError("malformed cursor") from err
     if (body["t"], times[0], times[1]) != (tenant_id, start, end):
         raise ForeignCursor("foreign cursor: it was made for another tenant or range")

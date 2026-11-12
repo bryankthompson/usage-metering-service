@@ -113,3 +113,12 @@ def test_a_cursor_over_the_length_cap_is_422_for_its_length(client_for, conn):
     over = client.get("/v1/tenants/tenant-1/charges", params={**params, "cursor": "A" * 8193})
     assert at_cap.status_code == 422 and "malformed" in at_cap.json()["detail"]            # read, and refused as garbage
     assert over.status_code == 422 and "at most" in str(over.json()["detail"])             # refused for its length, unread
+
+
+def test_a_deeply_nested_cursor_is_malformed_not_a_recursion_error():
+    import base64
+    from datetime import datetime, timezone
+    text = base64.urlsafe_b64encode(b"[" * 100000).decode()
+    t = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="malformed cursor"):
+        pricing.decode_cursor(text, "t", t, t)
