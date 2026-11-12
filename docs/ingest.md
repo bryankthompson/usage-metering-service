@@ -239,7 +239,7 @@ or a cut network. They are not set. (The requests in this run were in a lock wai
 hung the same way.)
 **While frozen:** each parked request holds a worker thread; 40 of them fill the pool, and then a new request that needs a
 thread gets no answer (nothing in 20 s, run) while `/healthz` answers. With only a few parked, a new request is a 503
-`entitlement check unavailable` after 5 s (log `edge cannot read entitlements: connection timeout expired`; run on POST
+`entitlement check unavailable` after 5 s (log `edge cannot read entitlements: couldn't get a connection after 5.00 sec`; run on POST
 `/v1/usage` and charges).
 **Recovery:** `docker compose unpause db`: all 50 parked requests answered 503 within 4 s (the server's timers fire on
 resume; a refused request stores nothing, so resend). Or `docker compose restart api` (healthz back in about 5 s): the parked

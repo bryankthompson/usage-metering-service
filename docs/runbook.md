@@ -232,17 +232,21 @@ met the failure) and `skipped: hour=... after an earlier failure in this pass`. 
 
 ## 11. Clients get 503, some with Retry-After
     curl -s -i "$BASE/v1/tenants/$T/charges?start=2026-11-10T23:00:00Z&end=2026-11-11T00:00:00Z" -H "X-Tenant-Id: $T"
-    docker compose ps -a db ; docker compose logs api | grep -E "edge cannot read|unavailable"
+    docker compose ps -a db ; docker compose logs api | grep -E "edge cannot read|unavailable|psycopg.pool"
 Two different 503s. `{"detail":"entitlement check unavailable"}` (no `Retry-After`) comes from the edge: the API cannot read the
-database. The log says why: `edge cannot read entitlements: failed to resolve host 'db'` (db stopped) or `... connection timeout
-expired` (db not answering; a new connection gives up after 5 s, measured with a paused db: 5.04 s with no load, 7.9 s with 50 clients
-retrying, because they queue for a worker thread; a stopped db answered in 4.0 s; a measurement from a walk of this runbook on 5dca15d, not a guarantee). Start or fix the db; the API needs
+database. The log says why in two lines: the edge line `edge cannot read entitlements: couldn't get a connection after 5.00 sec`
+(with `no pooled connection came free: {...}` after it) and a separate `psycopg.pool` WARNING that carries the cause, for example
+`error connecting in 'pool-1': failed to resolve host 'db'` (db stopped) or `password authentication failed for user "metering"`
+(wrong password in `DATABASE_URL`). A new connection gives up after 5 s: a stopped, killed or paused db, or a bad `DATABASE_URL`,
+answered 503 in 5.00 to 5.06 s with no load and in 6 to 10 s with 45 clients retrying, because they queue for a worker thread
+(a walk of this runbook on 1dd2039, not a guarantee). Start or fix the db; the API needs
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
 A third cause is a full pool: every connection one worker may hold is in use and a request waited `DB_POOL_TIMEOUT` (default 5 s)
 for one. The edge answers the same 503 (`entitlement check unavailable`, no `Retry-After`; a request past the edge gets `database unavailable`
 with `retry-after: 1`), and the log has `no pooled connection came free: {...}` with the pool's counters (`requests_waiting`, `pool_size`, `pool_available`,
-`requests_errors`). If the db is fine, the load is above `DB_POOL_MAX` (default 40 per worker): slow statements are holding
+`requests_errors`). The same line is logged when the db is down; the `psycopg.pool` WARNING beside it names the connection failure,
+and `docker compose ps -a db` shows whether the db is up. If the db is fine, the load is above `DB_POOL_MAX` (default 40 per worker): slow statements are holding
 connections, so look at `pg_stat_activity` (`application_name = 'usage-metering-api'`) before raising it. Raise `DB_POOL_MAX` only
 while workers x `DB_POOL_MAX` stays under the Postgres `max_connections` (100); each uvicorn worker process has its own pool. A bad value
 stops the first request with a `ValueError` naming the variable.
