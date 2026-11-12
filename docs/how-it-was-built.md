@@ -10,7 +10,7 @@ what the person running the sessions decided.
 
 The operator (the person running the sessions) opened them and answered scope questions. One session, the
 lead, wrote the scaffold (schema split by owner, stub routers, a deny-all edge, CI), wrote a brief for each job and was
-the only session that merged. The work lived in three repositories: the lead's, and one clone for each of two devs (dev A:
+the only session that merged. The work lived in three clones of the one repository: the lead's, and one for each of two devs (dev A:
 intake, rollups, end-to-end; dev B: prices, webhooks, entitlements, edge). A standing advisor session gave the lead second opinions. An
 independent review desk (DRC) read each change as a separate read-only job. Later work ran as short-lived lanes, one
 job each, and four read-only red-team lanes. Every lane had its own session and its own branch and worktree. Each had a
