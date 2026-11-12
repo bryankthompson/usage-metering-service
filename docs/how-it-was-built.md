@@ -83,8 +83,8 @@ Each layer fails in a different way from the others. One example each.
   Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
   `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
   That statement is about `dea36c8` (2026-11-10); #45 and #46 changed code afterwards, and `docs/build-log.md` (2026-11-11) records them.
-- **A final read by a person.** Planned. This page does not claim it has happened; `docs/testing.md` says nothing here
-  was checked by a person reading the diff.
+- **A read by the operator of five functions.** On 2026-11-11, on the money and entitlement path (section 8). Every other
+  review of this code was done by a model.
 
 ## 4. The review rounds
 
@@ -163,20 +163,21 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 
 ## 7. Limits of this method
 
-- The reviewers are models too: DRC, the advisor and the red-team lanes. They found real defects and also missed some. The
-  high-effort review of the entitlements slice missed the grace-window slide that dev A found by reading.
+- The reviewers are models too: DRC, the advisor and the red-team lanes. Apart from the five functions the operator read
+  (section 8), every review of this code was done by a model. They found real defects and also missed some. The high-effort
+  review of the entitlements slice missed the grace-window slide that dev A found by reading.
 - The platform adapter has not run against the real service. No key existed, so no call was made. It was tested
   against fixtures and a stand-in server only.
 - There is no load test beyond `scripts/flood.py` (600 requests from 150 clients), and a few one-off red-team measurements.
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
   they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
 - The merge gate's receipts are not stored in the repo (section 2).
-- No person is recorded as having read the whole diff. The five functions the operator said they read are in section 8.
 
 ## 8. What the operator decided
 
-The person running the sessions did not write or review the code, and this page does not claim they did. What they decided
-is below, each from their own words in the session, and each changed what was built.
+The code was written and reviewed by models. The operator's work was the method around them: the rules, the review gates, the
+red-team lanes and the no-context readers. Below is what they decided, each from their own words in the session, and each
+changed what was built.
 
 - **The job and the rules, before any code.** A small usage-metering and billing service, a prototype due the next
   morning; money in integers; no real payment keys; nothing taken from an earlier coding test; the README may claim only
@@ -193,8 +194,7 @@ is below, each from their own words in the session, and each changed what was bu
   working, directed by the lead; that is why the work ran as many small parallel lanes.
 - **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
   describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
-- **The operator's read, and the one open item.** The operator said on 2026-11-11 that they read five functions as they stand
-  at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
+- **The operator's read, and the one open item.** On 2026-11-11 the operator read the five functions on the money and entitlement path, as they
+  stand at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
   `_in_force` and `_rate` (`app/pricing.py:80` and `:88`), `require_entitlement` (`app/edge.py:36`) and `_apply_subscription`
-  (`app/webhooks.py:105`). This page does not claim they read anything else, or wrote or reviewed the code. The repo's name
-  stays generic; it has been public since 2026-11-10.
+  (`app/webhooks.py:105`). The repo's name stays generic; it has been public since 2026-11-10.
