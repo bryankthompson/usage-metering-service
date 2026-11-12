@@ -47,7 +47,7 @@ agents with no context who read a clean copy of the tree. Round one of the red t
 and round two 0 blockers reported, 3 major and 7 minor; a fifth lens that checked the README and docs against the code found
 0 major and 9 minor.
 
-Who checked it. Every reviewer was a model, except that the operator read five functions on the money and entitlement path:
+Who checked it. Every reviewer was a model, except that the operator read five functions on the money and entitlement path as they stood on 2026-11-11 (commit `5dca15d`):
 `_store`, `close_hour`, `_in_force` with `_rate`, `require_entitlement` and `_apply_subscription`. The reviewers found real
 defects and missed some; [docs/reviews/README.md](docs/reviews/README.md) keeps their counts.
 The platform adapter (`seekrflow`) is checked against hand-written examples of its responses and the stand-in

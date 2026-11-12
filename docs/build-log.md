@@ -19,6 +19,12 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 > on 2026-11-11: the adapter, `seekrflow`, is now named everywhere (see docs/how-it-was-built.md section 8). It still runs on hand-written
 > fixtures; no call to the real service has been made. The repo's own name stays generic.
 
+> Note, 2026-11-12: the lead cockpit merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone
+> ran as lead of its own lanes and merged #53 to #71 through the same gate. The merge command takes a review receipt for the
+> branch or the merging lead's written reason; green CI and a current `main` apply to both. Through #84, 69 merges carried
+> a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one compose line, a format commit shown AST-equal,
+> a measurement script and a rebase of a head DRC had reviewed at high).
+
 ## Log
 
 - **15:03** Requests to build this arrived at the lead as messages from two other cockpits. They were
@@ -309,3 +315,17 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   "has not happened" for those functions only. Still true: the platform adapter has never run against the real service,
   `--live` has never run, and no person has read the whole diff
   (the operator read five functions, see section 8 of how-it-was-built.md).
+
+- **2026-11-12 (PRs #48 to #84).** The operator-read, role-wording and testing-guide updates recorded who read five functions
+  and clarified the roles. Later, the lead cockpit merged PRs #48 to #52 and #72 to #82, plus #84; from 2026-11-11 each
+  dev clone ran as lead of its own lanes and merged #53 to #71 through the same gate. Through #84, 69 merges carried a DRC
+  receipt and 14 a written reason, including docs, CI steps, tests, one index, one compose line, a format commit shown
+  AST-equal, a measurement script and a rebase of a head DRC had reviewed at high. DRC reviewed the request-path pool
+  (#67) and charges paging (#65) at high, and batch ingest (#64) at high before its rebase. The outside review of
+  2026-11-11 led to the pool, batch ingest, charges paging and the CI gates.
+
+  CI gate changes put lint and the image build into the `test` job (#74), then added the compose smoke test that brings up
+  the stack and runs `scripts/demo.sh` (#75). The throughput measurement was added in #82. Documentation work included
+  the README frame (#77), docs walks (#78 and #80) and positive README wording (#79). PR #76 merged on the lead's written
+  reason after the advisor's ruling, CI green; a DRC review at high of its index commit (`a64e911`, `db/001_usage.sql`) was
+  run afterwards on 2026-11-12 and found nothing.

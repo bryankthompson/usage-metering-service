@@ -1,4 +1,4 @@
-# Same checks as the `lint` job and the format step of `test` in .github/workflows/ci.yml (config: ruff.toml). Checks only; nothing here rewrites files.
+# Same lint and format checks as steps of the `test` job in .github/workflows/ci.yml (config: ruff.toml). Checks only; nothing here rewrites files.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.6

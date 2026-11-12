@@ -2,24 +2,30 @@
 
 The longer account of how the work was run. [how-it-was-built.md](how-it-was-built.md) covers the checks, the review rounds and the limits; this page covers the roles, the gates and what the gates and cross-checks caught.
 
-Claude Code sessions built this in one afternoon and evening, each in its own cockpit (a Zellij session with a lead tab, a
-review desk and a merge gate): one lead, two assistant devs, a standing advisor that the lead asked for second opinions,
-a review desk (DRC) and short-lived lanes for single jobs. [docs/build-log.md](build-log.md) is the timestamped
+The first build, PRs #1 to #44, took one afternoon and evening on 2026-11-10; merges ran from 15:30 to
+23:26, and the repo went public at about 22:25, at `dea36c8` (#41). Work continued on 2026-11-11, from 14:02 to 23:58, and 2026-11-12, from 13:15 to 17:12 through #84
+(all times US Central, UTC-6). Claude Code sessions
+worked largely unattended, with the lead, the advisor and the operator steering at decision points. Each session ran in
+its own cockpit (a Zellij session with a lead tab, a review desk and a merge gate): a lead, two assistant devs, a
+standing advisor, a review desk (DRC) and short-lived lanes for single jobs. [docs/build-log.md](build-log.md) is the timestamped
 record; this is the short version.
 
 [docs/how-it-was-built.md](how-it-was-built.md) explains how AI-written code was checked: the loop each lane was
 briefed to follow, the review rounds with their counts, what went wrong and the limits of the method.
 
-**Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI), one brief per
-dev, and was the only session allowed to merge. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
+**Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI) and one brief per
+dev. The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone ran as lead of its own
+lanes and merged PRs #53 to #71 through the same gate. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
 built the price table, the Stripe webhooks, the entitlement record, the edge check and the first README. Later work came
 in as lanes, each a branch with its own worktree: reconcile, the delinquent report, the platform adapter, the design
 notes, the code tour, the runbook, the testing guide, the hardening fixes and four red-team reviews.
 
-**Gates.** A lane merged only when its branch contained the latest `main` with the tests run on that code, an
-independent review desk (DRC) had reviewed it, and the CI check `test` was green. The cockpit's merge
-command refuses without a review receipt for the branch, a head that contains the latest `main`, and green CI; commits
-added after the review (a merge of `main`, a small fix) and any finding left owed need the lead's written note. Each merge moved `main` and made the next
+**Gates.** A lane merged when its branch contained the latest `main`, tests ran on that code, the CI check `test` was green,
+and it had an independent review desk (DRC) receipt or the merging lead's written reason. The merge command takes a
+review receipt for the branch or the merging lead's written reason; green CI and a current `main` apply to both. Commits
+added after review and any finding left owed need the lead's written note. Through #84, 69 merges carried a DRC receipt
+and 14 a written reason (docs, CI steps, tests, one index, one compose line, a format commit shown AST-equal, a
+measurement script and a rebase of a head DRC had reviewed at high). Each merge moved `main` and made the next
 branch stale, so the lead rebased the early lanes and merged `main` into the later ones, re-ran the tests and merged one
 lane at a time, each as its own pull request (`git log --first-parent --merges` lists them).
 

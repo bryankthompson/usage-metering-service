@@ -2,17 +2,19 @@
 
 Almost all of this code was written by AI coding sessions. This page says how the work was organised and what was done to
 find out whether it is right. It states what each check found and what it did not. Times are from `docs/build-log.md`
-(US Central, 2026-11-10); pull request numbers are from `git log --first-parent --merges`. Counts of review findings come
+(US Central, 2026-11-10 onward); pull request numbers are from `git log --first-parent --merges`. Counts of review findings come
 from the review reports in [docs/reviews/](reviews/README.md), kept as written; this page restates them. Section 8 says
 what the person running the sessions decided.
 
 ## 1. The setup
 
 The operator (the person running the sessions) opened them and answered scope questions. One session, the
-lead, wrote the scaffold (schema split by owner, stub routers, a deny-all edge, CI), wrote a brief for each job and was
-the only session that merged. The work lived in three clones of the one repository: the lead's, and one for each of two devs (dev A:
+lead, wrote the scaffold (schema split by owner, stub routers, a deny-all edge, CI), and wrote a brief for each job.
+The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone ran as lead of its own lanes
+and merged #53 to #71 through the same gate. The work lived in three clones of the one repository: the lead's,
+and one for each of two devs (dev A:
 intake, rollups, end-to-end; dev B: prices, webhooks, entitlements, edge). A standing advisor session gave the lead second opinions. An
-independent review desk (DRC) read each change as a separate read-only job. Later work ran as short-lived lanes, one
+independent review desk (DRC) reviewed submitted branches as separate read-only jobs. Later work ran as short-lived lanes, one
 job each, and four read-only red-team lanes. Every lane had its own session and its own branch and worktree. Each had a
 brief on paper that fixed which files it could touch (build log 17:30). Messages between sessions were treated as data
 to check, not as orders.
@@ -30,8 +32,8 @@ This is the loop each lane was asked to follow.
 6. DRC review of that exact head. The tier is `auto`, or `high` for guards, the entitlement path and large diffs
    (build log 15:49, 17:35, 17:40).
 7. The CI check `test` is green.
-8. The merge gate. The merge command refuses without a review receipt for the branch, a head that contains the latest
-   `main` and green CI. Commits added after the review, and any finding left owed, need the lead's written note.
+8. The merge gate. The merge command takes a review receipt for the branch or the merging lead's written reason; green CI
+   and a current `main` apply to both. Commits added after the review, and any finding left owed, need the lead's written note.
 9. One pull request per change: `git log --first-parent --merges` lists every merged pull request.
 
 This is the loop each lane was briefed to follow, and most changes followed it, but not every one. The body-cap fix in
@@ -77,14 +79,14 @@ Each layer fails in a different way from the others. One example each.
   flood, data kept across `down` and `up`, emptied by `down -v`, 601 tests, also with `PGTZ=America/New_York`; 20:51).
   Dev B ran the suite from its own clean clone at the same commit and checked 40 citations and every link. Code changed
   after those runs: #38 (`a583885`, `05eec07`) changed the charges connection and its test, and `6eacf22` changed a
-  docstring in `app/db.py`. The final-code run was the lead's: from a clean clone of `dea36c8`, 610 tests, the demo and
+  docstring in `app/db.py`. The lead ran from a clean clone of `dea36c8`: 610 tests, the demo and
   the outage check passed (the first demo call came before the API was listening; the rerun passed, as
-  `docs/demo.md` says). No code changed after `dea36c8`: `git diff dea36c8 main -- app tests scripts compose.yaml
-  Dockerfile pyproject.toml uv.lock` is empty, and the later commits are documentation. The flood, data-kept-across-
-  `down`/`up` check and New York time zone run were not repeated at `dea36c8`.
-  That statement is about `dea36c8` (2026-11-10); #45 and #46 changed code afterwards, and `docs/build-log.md` (2026-11-11) records them.
+  `docs/demo.md` says). `dea36c8` was the final-code run of the first public version. Later merges ran the CI suite;
+  since #75, CI also brings up the compose stack and runs the demo on every pull request and on main. The flood, data-kept-across-
+  `down`/`up` check and New York time zone run were not repeated at `dea36c8`. #45 and #46 changed code afterwards, as
+  `docs/build-log.md` (2026-11-11) records.
 - **Reviews by models, and a read by the operator.** DRC, the advisor and the red-team lanes were models. On 2026-11-11 the
-  operator read five functions on the money and entitlement path (section 8).
+  operator read five functions on the money and entitlement path as they stood on 2026-11-11 (commit `5dca15d`, section 8).
 
 ## 4. The review rounds
 
@@ -170,7 +172,9 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 - The load check is `scripts/flood.py` (600 requests from 150 clients), with a few one-off red-team measurements.
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
   they tested. The build log restates some counts, and its test counts are from handoffs, not from the repo.
-- The merge gate's receipts are kept outside the repo (section 2); the repo keeps each pull request's merge commit and the build log.
+- Through #84, 69 merges carried a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one compose
+  line, a format commit shown AST-equal, a measurement script and a rebase of a head DRC had reviewed at high). The merge
+  gate's receipts are kept outside the repo (section 2); the repo keeps each pull request's merge commit and the build log.
 
 ## 8. What the operator decided
 
@@ -181,7 +185,7 @@ changed what was built.
 - **The job and the rules, before any code.** A small usage-metering and billing service, a prototype due the next
   morning; money in integers; no real payment keys; nothing taken from an earlier coding test; the README may claim only
   what the code does.
-- **How the work is checked.** Independent review and a green CI check on every merge, and the repo was private while it
+- **How the work is checked.** A DRC receipt or the merging lead's written reason and a green CI check on every merge, and the repo was private while it
   was built; it was made public on 2026-11-10. The operator also said that the way the sessions work together is part of
   what the build is meant to show, so the build log is kept as it happens.
 - **What the platform adapter may be.** It runs on hand-written fixtures and a stand-in server because there was no API key
@@ -195,6 +199,6 @@ changed what was built.
 - **A last test of the story (21:36).** Before publishing, the operator asked for agents with no context to read the repo,
   describe what they see, and say whether it tells the story. Their findings led to #38 and #39.
 - **The operator's read.** On 2026-11-11 the operator read the five functions on the money and entitlement path, as they
-  stand at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
+  stood at `5dca15d`: `_store` (`app/ingest.py:136`), `close_hour` (`app/rollup.py:64`, with the ClickHouse copy after the commit),
   `_in_force` and `_rate` (`app/pricing.py:80` and `:88`), `require_entitlement` (`app/edge.py:36`) and `_apply_subscription`
   (`app/webhooks.py:105`). The repo's name stays generic; it has been public since 2026-11-10.
