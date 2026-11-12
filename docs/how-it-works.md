@@ -71,8 +71,10 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
 Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
-a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored), a connection that takes more than 5 s to open and a
-statement that runs more than 15 s on the request path (the edge's own 503, "entitlement check unavailable", carries no `Retry-After`); the
+a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open
+(the edge's own 503, "entitlement check unavailable", carries no `Retry-After`). A statement that runs more than 15 s on the request path is
+**504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on the routes whose database error reaches the
+handler in `app/main.py`, such as the charges route and the webhook route; `POST /v1/usage` and the entitlement edge catch it themselves and still answer 503. The
 rollup, reconcile and delinquent runs have no statement timeout.
 
 **7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and

@@ -182,7 +182,7 @@ type, or a failed payment for a `canceled` tenant). The HTTP answer is `{"status
     2026-11-11 01:11:36,665 WARNING app.webhooks webhook refused: No signatures found matching the expected signature for payload
 A subscription event stamped with the same second as a cancel is `stale` (a tie never undoes a cancel: the `tie after cancel`
 line). Or use Stripe's own list of deliveries, which should show the response Stripe got (Stripe's side: not checked here, nothing in this repo calls Stripe). Refusals: 400 `missing Stripe-Signature header` (no header), 400 `invalid signature or payload` (bad signature),
-413 `webhook body too large` (over 1 MiB), 503 `database unavailable` (database down; step 11), 503 `webhook secret not configured`
+413 `webhook body too large` (over 1 MiB), 503 `database unavailable` (database down; step 11), 504 `query timed out` (a statement over 15 s; no retry-after), 503 `webhook secret not configured`
 (no or blank `STRIPE_WEBHOOK_SECRET`) or 503 `grace period not configured` (`GRACE_PERIOD_HOURS` out of range). A payment failure
 opens grace for `GRACE_PERIOD_HOURS` (default 72, 0 to 8760) from the FIRST failure; later retries do not extend it; an `active`
 event clears it; a cancel clears it and nothing but a subscription event reopens access.
@@ -234,8 +234,8 @@ expired` (db not answering; a new connection gives up after 5 s, measured with a
 retrying, because they queue for a worker thread; a stopped db answered in 4.0 s; a measurement from a walk of this runbook on 5dca15d, not a guarantee). Start or fix the db; the API needs
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
-`{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s, a statement over
-15 s (`app/db.py`; not run here), or the db dying mid-request. Nothing of the failed attempt was stored, so the same request can be
+`{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s or the db dying mid-request (a statement over
+15 s is 504 `{"detail":"query timed out"}` without `retry-after` on the charges and webhook routes, `app/main.py`; `POST /v1/usage` still answers 503 for it; not run here). Nothing of the failed attempt was stored, so the same request can be
 resent. A held lock shows in the log and in the database (the usage request waited 2.02 s):
 
     ERROR:    usage unavailable: canceling statement due to lock timeout
@@ -278,7 +278,8 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | Customer says usage is lower than billed | two keys for one call, or the wrong price version | 7, 6 |
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
-| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s, a statement over 15 s, or the db dying | 11 |
+| 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying (on `/v1/usage` also a statement over 15 s) | 11 |
+| 504 `query timed out`, no `retry-after` | a statement over 15 s on the charges or webhook route | 11 |
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |

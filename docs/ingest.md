@@ -90,7 +90,7 @@ holds the shared hour lock would block that hour's close for as long as it stays
 `test_the_closing_side_has_no_timeout_it_waits_for_ingests_in_flight`), and no `idle_in_transaction_session_timeout` is set.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
-so a database that stops accepting connections, or answers slowly, is a 503. `/healthz` is an `async` route that touches
+so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on the routes whose database error reaches the handler in `app/main.py` (the charges and webhook routes; `POST /v1/usage` still answers 503). `/healthz` is an `async` route that touches
 nothing, so it keeps answering while every worker thread is busy; it shows that the process is up and its event loop
 answers, not that the database does.
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the

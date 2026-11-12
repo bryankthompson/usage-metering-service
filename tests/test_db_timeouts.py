@@ -4,11 +4,12 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from app import db, pricing, rollup
-from app.main import app
+from app.main import app, create_app
 
 BODY = {"tenant_id": "t1", "idempotency_key": "k1", "model": "m1", "tokens_in": 1, "tokens_out": 1,
         "occurred_at": "2026-11-10T10:30:00Z"}
@@ -62,7 +63,7 @@ def test_a_database_that_never_answers_is_a_503_and_healthz_keeps_answering(sile
     assert result["seconds"] < 5
 
 
-def test_a_statement_past_the_timeout_is_a_503_not_a_500_and_not_a_hang(conn, monkeypatch):
+def test_a_statement_past_the_timeout_is_a_504_query_timed_out_not_a_503_and_not_a_hang(conn, monkeypatch):
     monkeypatch.setattr(db, "REQUEST_STATEMENT_TIMEOUT_MS", 300)
     conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES ('t1', 'active')")
     conn.commit()
@@ -77,8 +78,22 @@ def test_a_statement_past_the_timeout_is_a_503_not_a_500_and_not_a_hang(conn, mo
     started = time.monotonic()
     resp = client.get("/v1/tenants/t1/charges", params={"start": "2026-11-01T00:00:00Z", "end": "2026-11-02T00:00:00Z"},
                       headers={"X-Tenant-Id": "t1"})
-    assert (resp.status_code, resp.json()) == (503, {"detail": "database unavailable"})
+    assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
+    assert "retry-after" not in resp.headers
     assert time.monotonic() - started < 4
+
+
+@pytest.mark.parametrize("error", [psycopg.errors.LockNotAvailable("lock timeout"), psycopg.OperationalError("refused")])
+def test_a_lock_timeout_or_a_failed_connection_stays_a_503_database_unavailable(error):
+    """The QueryCanceled handler must not catch its OperationalError siblings (test_lock_timeout.py covers the real lock)."""
+    probe = create_app()
+
+    @probe.get("/probe")
+    def raise_it():
+        raise error
+
+    resp = TestClient(probe, raise_server_exceptions=False).get("/probe")
+    assert (resp.status_code, resp.json(), resp.headers.get("retry-after")) == (503, {"detail": "database unavailable"}, "1")
 
 
 def test_the_default_connection_has_the_request_statement_timeout():
