@@ -242,6 +242,8 @@ and every request answered 201. Each cell is one warm-up run and 5 timed runs; c
 | batch of 100 | 8 | 12168 (11685..13876) | 20939 (18167..21630) | 63.4 / 89.9 | 37.7 / 49.8 |
 
 These figures are what `scripts/throughput.py` printed on this machine at these commits; the client, the api and Postgres share the one machine.
+On the ingest path (`app/ingest.py`, `app/edge.py`, `app/db.py`, `app/main.py`) the two commits differ by the pool (`5c8aa17`) and by
+type annotations and formatting (`git log e4a4bf8..a616ac0 -- app/ingest.py app/edge.py app/db.py app/main.py` lists six commits).
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the
 statement timeout is enforced by the server and the client has no timer of its own; the settings query right after
 connecting is likewise not bounded (found by review, not fixed).
