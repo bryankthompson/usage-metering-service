@@ -251,7 +251,7 @@ def ingest_usage_batch(
                         tenant, j, i, event.idempotency_key)
             raise HTTPException(status_code=409, detail=f"events[{j}] and events[{i}] use the same idempotency_key with different payloads")
     try:
-        with db.connect() as conn:      # leaving the block on an exception rolls the whole batch back
+        with db.request_connection() as conn:      # leaving the block on an exception rolls the whole batch back
             results = _store_batch(events, first, tenant, conn)
     except psycopg.errors.QueryCanceled:
         raise
