@@ -90,6 +90,7 @@ Counts: 0 blockers, 0 major, 2 minor, 1 note. The suite was not re-run.
 app/pricing.py UNCLOSED_LIMIT = 100, query `LIMIT %(limit)s`; the response carries only the list.
 A week has 168 hours; a caller who sees a list of exactly 100 cannot tell whether 100 or 168 hours are missing from `total_micros`, and the hours after the 100th are exactly the ones it cannot see.
 Repro (attack script b2.py): 150 open hours for t1 from 2027-01-01, `GET charges?start=2027-01-01T00:00:00Z&end=2027-01-08T00:00:00Z` -> `200`, `len(unclosed_hours) == 100`, no other field.
+> Note, 2026-11-11: since PR #65 the charges answer carries `unclosed_hours_truncated`, true when more than `UNCLOSED_LIMIT` (100) hours were open; `unclosed_hours` is still the earliest 100. A range with more than 10,000 lines is also read in pages (`limit`, `cursor`); see docs/billing.md, Paging.
 Fix: query LIMIT 101 and add `"unclosed_truncated": true` (or return `unclosed_count`).
 
 ### RT-money-9  MINOR  A start or end that is not on an hour boundary gives usage that is in the window but not in the bill, and usage outside the window that is
