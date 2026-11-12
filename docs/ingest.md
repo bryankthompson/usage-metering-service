@@ -34,7 +34,7 @@ Body (all required): `tenant_id`, `idempotency_key` and `model` (1 to 200 chars 
   the hour ends, so a client that buffers through an outage and resends later than that gets `201` with `"late": true`
   and is never billed for that event.
 
-**Tests:** `docker compose up -d db`, then `uv run pytest -q tests/test_ingest.py tests/test_attack_ingest.py` (`DATABASE_URL` if not port 5432). The second file is the hostile-input, race and outage tests.
+**Tests:** `scripts/test tests/test_ingest.py tests/test_attack_ingest.py` (own database on port 5455). The second file is the hostile-input, race and outage tests.
 
 **Does not do:** batch intake, or authentication beyond the edge dependency.
 
@@ -60,7 +60,7 @@ to commit; `close_hour` takes the exclusive lock for the hour before it reads an
 `closed hour=... rows=N events=N` per closed hour, or `nothing due`. A close runs with no statement timeout.
 Compose runs it as the `rollup` service (`--every 3600`).
 
-**Tests:** `uv run pytest -q tests/test_rollup.py tests/test_due_hours.py` (the second compares `DUE_HOURS` with the old query and guards its plan). The lock tests hold one side's lock by hand and
+**Tests:** `scripts/test tests/test_rollup.py tests/test_due_hours.py` (the second compares `DUE_HOURS` with the old query and guards its plan). The lock tests hold one side's lock by hand and
 check the other side waits.
 
 **Does not do:** reconciliation, pushing usage to Stripe, a query API over rollups, a queue.

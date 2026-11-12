@@ -169,7 +169,7 @@ These are known and not fixed; see also the two assumptions above (one customer 
   logger, but a root handler with its own stricter level, installed before the app starts, still filters the lines. Under
   `docker compose` no such handler exists. Found in review, not fixed.
 
-Tests: `uv run pytest -q tests/test_webhooks.py tests/test_edge.py` (signed with a fake `whsec_test_...` secret).
+Tests: `scripts/test tests/test_webhooks.py tests/test_edge.py` (signed with a fake `whsec_test_...` secret).
 The adversarial set is `tests/test_attack_webhooks.py`, `tests/test_attack_billing.py` and `tests/test_attack_db_outage.py`.
 Not done: calling Stripe, usage push, invoices, real authentication.
 
@@ -181,4 +181,4 @@ Not done: calling Stripe, usage push, invoices, real authentication.
 - `--json`: one object per line; default is a plain table.
 - `--fail-on-expired`: exit 1 when any `past_due` tenant is denied (`grace_expired` or `past_due_no_grace`), else 0.
 - `--at ISO`: evaluate at that instant (needs a zone) instead of now. A bad argument exits 2.
-Test: `uv run pytest -q tests/test_delinquent.py`.
+Test: `scripts/test tests/test_delinquent.py`.

@@ -16,6 +16,7 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 | Database outage | `scripts/outage-check.sh` | 503 while the db is stopped, 201 after, earlier row still there | no |
 
 `scripts/test` starts a throwaway Postgres container and gives each checkout its own database (or uses `DATABASE_URL`).
+Bare `pytest` exits 2 before any test when `DATABASE_URL` is unset, because the tests truncate the database they connect to and the default is the live compose database on port 5432: use `scripts/test`.
 The last four rows need a live `docker compose up`; `API_PORT` and `DB_PORT` pick the ports, `COMPOSE_PROJECT_NAME` the project.
 Needs on the host: docker compose v2 (`docker compose`, `up --wait`), `uv`, python3 and curl. Free ports: 8000 and 5432 for the
 stack, 5455 for the tests, or set `API_PORT`, `DB_PORT`, `TEST_DB_PORT`.
