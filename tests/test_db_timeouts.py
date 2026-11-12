@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, pricing, rollup
+from app import db, ingest, pricing, rollup
 from app.main import app, create_app
 
 BODY = {"tenant_id": "t1", "idempotency_key": "k1", "model": "m1", "tokens_in": 1, "tokens_out": 1,
@@ -81,6 +81,29 @@ def test_a_statement_past_the_timeout_is_a_504_query_timed_out_not_a_503_and_not
     assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
     assert "retry-after" not in resp.headers
     assert time.monotonic() - started < 4
+
+
+def test_a_usage_statement_past_the_timeout_is_a_504_stores_nothing_and_a_resend_is_a_201(conn, monkeypatch):
+    monkeypatch.setattr(db, "REQUEST_STATEMENT_TIMEOUT_MS", 300)
+    conn.execute("INSERT INTO entitlements (tenant_id, status) VALUES ('t1', 'active')")
+    conn.commit()
+    original = ingest.lock_hour_shared
+
+    def slow(c, *args, **kwargs):
+        c.execute("SELECT pg_sleep(5)")
+        return original(c, *args, **kwargs)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    monkeypatch.setattr(ingest, "lock_hour_shared", slow)
+    started = time.monotonic()
+    resp = client.post("/v1/usage", json=BODY, headers={"X-Tenant-Id": "t1"})
+    assert (resp.status_code, resp.json()) == (504, {"detail": "query timed out"})
+    assert "retry-after" not in resp.headers
+    assert time.monotonic() - started < 4
+    assert conn.execute("SELECT count(*) AS n FROM usage_events").fetchone()["n"] == 0
+    conn.commit()
+    monkeypatch.setattr(ingest, "lock_hour_shared", original)
+    assert client.post("/v1/usage", json=BODY, headers={"X-Tenant-Id": "t1"}).status_code == 201
 
 
 @pytest.mark.parametrize("error", [psycopg.errors.LockNotAvailable("lock timeout"), psycopg.OperationalError("refused")])

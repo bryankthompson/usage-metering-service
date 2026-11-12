@@ -1,0 +1,8 @@
+# The image copies only pyproject.toml, uv.lock, app/ and db/ (Dockerfile); everything else stays out of the build context.
+*
+!pyproject.toml
+!uv.lock
+!app
+!db
+**/__pycache__
+**/*.pyc

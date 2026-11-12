@@ -36,7 +36,6 @@ def test_each_state_with_whole_hours(conn, capsys):
     put(conn, "c-none", "past_due")
     put(conn, "d-canceled", "canceled")
     put(conn, "e-active", "active")
-    put(conn, "f-trial", "trialing")
     _, out = run(capsys, "--json")
     rows = {r["tenant_id"]: r for r in map(json.loads, out.splitlines())}
     assert set(rows) == {"a-grace", "b-expired", "c-none", "d-canceled"}

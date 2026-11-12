@@ -235,7 +235,7 @@ retrying, because they queue for a worker thread; a stopped db answered in 4.0 s
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
 `{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s or the db dying mid-request (a statement over
-15 s is 504 `{"detail":"query timed out"}` without `retry-after` on the charges and webhook routes, `app/main.py`; `POST /v1/usage` still answers 503 for it; not run here). Nothing of the failed attempt was stored, so the same request can be
+15 s is 504 `{"detail":"query timed out"}` without `retry-after` on every route after the entitlement edge, including `POST /v1/usage` (`app/main.py`); covered by `tests/test_db_timeouts.py` with a real `pg_sleep`, not run against a compose stack). Nothing of the failed attempt was stored, so the same request can be
 resent. A held lock shows in the log and in the database (the usage request waited 2.02 s):
 
     ERROR:    usage unavailable: canceling statement due to lock timeout
