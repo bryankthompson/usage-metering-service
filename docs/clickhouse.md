@@ -13,7 +13,9 @@ python -m app.reconcile --actuals actuals.jsonl       # exit 1 on drift above --
 ```
 `CLICKHOUSE_URL` unset or empty turns the mirror off. A plain `docker compose up` does not start or pull ClickHouse. From the
 host use `CLICKHOUSE_URL=http://127.0.0.1:8123` (port `CLICKHOUSE_PORT`, default 8123, published on 127.0.0.1 only). The image is
-pinned (`clickhouse/clickhouse-server:25.8`), the data is in the named volume `chdata`, and the service has a `/ping` health check.
+pinned (`clickhouse/clickhouse-server:25.8`), the data is in the named volume `chdata`, and the service has a `/ping` health check. To reset both databases use
+`docker compose --profile analytics down -v`, which removes `pgdata` and `chdata` and the network. A plain `docker compose down -v`
+on a stack started with the profile removes `pgdata` only; the ClickHouse container keeps running with `chdata` and holds the network.
 
 ## The table
 `usage_rollups_hourly (tenant_id, model, hour_start DateTime('UTC'), tokens_in, tokens_out, event_count Int64, version UInt64)`,
