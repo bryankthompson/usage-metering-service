@@ -300,7 +300,7 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 413 on `/v1/usage/batch` | request body over 7,363,012 bytes | 12 |
-| 422 on `/v1/usage/batch` | an invalid event (`loc` names the index), no events, over 1000 events, or over 48 UTC hours | 7 |
+| 422 on `/v1/usage/batch` | an invalid event (`loc` names the index), no events, over 1000 events, or events in more than 48 distinct UTC hours | 7 |
 | 402 on usage or charges | no entitlement row, canceled, or grace expired | 2, 8 |
 | `reconcile` exits 1 | drift (rollup table changed outside `app.rollup`, or the other source differs), or `--fail-on-unbilled` | 4 |
 | Tenant paid but still denied | only a `customer.subscription.*` event reopens access; `invoice.paid` does not | 8 |
