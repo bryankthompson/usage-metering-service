@@ -11,9 +11,9 @@ payload: **200** `duplicate`, nothing stored. Both bodies carry `event_id` and `
 different payload: **409**. Body `tenant_id` is not the
 tenant the edge admitted: **403**. Invalid body: **422**. A body over 64 KiB: **413**: an oversized
 `Content-Length` is rejected immediately; otherwise streamed chunks are counted and the request is rejected as soon as
-they pass the cap, without buffering the rest (also with no credentials). A body the server cannot parse at all (for
-example JSON nested very deep: measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400 from about
-10,077, so the boundary lies between those two numbers): **400**.
+they pass the cap, without buffering the rest (also with no credentials). A body that is not JSON: **422**
+(`json_invalid`). JSON nested very deep: **400** (measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400
+from about 10,077, so the boundary lies between those two numbers).
 
 `POST /v1/usage/batch` takes `{"events": [...]}`, 1 to 1000 events occupying at most 48 distinct UTC-hour buckets (else **422**; the elapsed date range may be longer), each
 validated and deduplicated exactly as above, in one transaction: if any event is refused (403, 409, 422) or the database fails,

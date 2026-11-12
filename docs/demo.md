@@ -36,6 +36,8 @@ CI runs this script on every pull request and push to `main`, as the smoke steps
 healthcheck on `/healthz`, so `--wait` returns when it answers), polls `/healthz` for up to 30 seconds and fails loudly if it
 does not answer, starts `scripts/stand_in_inference.py` in the background (stopped when the script ends), runs
 `scripts/scenario.py`, and prints the seconds each stage took and the total. The times are measured on each run; none is promised.
+Run on its own, `scripts/scenario.py` needs the stand-in inference server already running: start
+`python3 scripts/stand_in_inference.py --port 8089` in another terminal first (`--stand-in-port` on the scenario picks another port).
 
 The scenario plays three tenants (active, past_due in grace after `invoice.payment_failed`, canceled). The two paying tenants make
 inference calls through the `seekrflow` adapter's functions (`app/seekrflow.py`), so tokens in and out come from response bodies: chat with
@@ -79,7 +81,7 @@ expected 200, got 500`) and the rollup container restarts in a loop (`no pg_hba.
 `pg_isready`, the api's is `/healthz` (the process only) and the rollup has none. Check with
 `docker compose exec -T db psql -U metering -d metering -c '\dt'`, which lists the tables on a good stack. The way back is
 `docker compose down -v`, then `docker compose up -d --build --wait` again: a first start holds no data to keep, and
-`down -v` deletes the volume. Seven kills of the db container at different points of the first start, each followed by
+`down -v` deletes the volume. Eight kills of the db container at five different points of the first start, each followed by
 that fix, all ended at `demo ok`.
 To add a column that a newer `db/` file brings to a stack that has data, apply the schema to the running stack, which keeps
 the data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`
