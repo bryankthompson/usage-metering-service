@@ -11,6 +11,7 @@ import argparse
 import logging
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 import psycopg
@@ -90,7 +91,11 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int
 
 
 def close_due_hours(
-    conn: psycopg.Connection, now: datetime, grace: timedelta = DEFAULT_GRACE, failed: list[datetime] | None = None
+    conn: psycopg.Connection,
+    now: datetime,
+    grace: timedelta = DEFAULT_GRACE,
+    failed: list[datetime] | None = None,
+    reconnect: Callable[[], psycopg.Connection] | None = None,
 ) -> list[tuple[datetime, int, int]]:
     """Close every unclosed hour with events that ended at least `grace` before `now`, oldest first.
 
@@ -98,30 +103,58 @@ def close_due_hours(
     example a BIGINT overflow) is rolled back, logged at ERROR with its hour, appended to `failed` and skipped, so
     it cannot block the hours after it; the next run retries it. Hours may close out of order: an unclosed earlier
     hour does not make a later event late, because lateness is judged per hour.
+
+    A failure that lost the connection (the server restarted or killed it) is that hour's failure like any other, but
+    the dead connection would fail every hour after it. With `reconnect`, each hour that finds the connection broken
+    asks it for a new one first; if that raises, that hour fails like any other (logged, in `failed`) and the next hour
+    asks again. The caller still owns `conn` and closes it (closing a dead one is harmless); this function closes the
+    connections it got from `reconnect`. The failed hour is not retried here.
     """
     _require_aware(now, "now")
     hours = [r["hour_start"] for r in conn.execute(DUE_HOURS, {"cutoff": now - grace}).fetchall()]
     conn.commit()
     closed = []
-    for hour in hours:
-        try:
-            result = close_hour(conn, hour)
-        except Exception as err:  # close_hour has rolled back: nothing of this hour is written
-            log.error("rollup failed: hour=%s error=%r", hour.astimezone(timezone.utc).isoformat(), err)
-            if failed is not None:
-                failed.append(hour)
-            continue
-        if result is not None:  # None: another process closed it first
-            closed.append((hour, *result))
+    opened = None  # the connection last obtained from `reconnect`, which this function must close
+
+    def fail(hour: datetime, err: Exception) -> None:
+        log.error("rollup failed: hour=%s error=%r", hour.astimezone(timezone.utc).isoformat(), err)
+        if failed is not None:
+            failed.append(hour)
+
+    try:
+        for hour in hours:
+            if conn.broken and reconnect is not None:  # lost, not merely rolled back: this hour needs a live one
+                try:
+                    fresh = reconnect()
+                except Exception as err:  # still down: this hour fails, the next one tries again
+                    fail(hour, err)
+                    continue
+                if opened is not None:
+                    opened.close()
+                conn = opened = fresh
+            try:
+                result = close_hour(conn, hour)
+            except Exception as err:  # close_hour has rolled back: nothing of this hour is written
+                fail(hour, err)
+                continue
+            if result is not None:  # None: another process closed it first
+                closed.append((hour, *result))
+    finally:
+        if opened is not None:
+            opened.close()
     return closed
+
+
+def _connect() -> psycopg.Connection:
+    return db.connect(statement_timeout_ms=0)  # no statement timeout: a large hour legitimately takes long
 
 
 def run_once() -> list[datetime]:
     """Close every due hour once and print the result. Returns the hours that failed."""
     failed: list[datetime] = []
-    conn = db.connect(statement_timeout_ms=0)  # no statement timeout: a large hour legitimately takes long
+    conn = _connect()
     try:
-        closed = close_due_hours(conn, datetime.now(timezone.utc), failed=failed)
+        closed = close_due_hours(conn, datetime.now(timezone.utc), failed=failed, reconnect=_connect)
     finally:
         conn.close()
     for hour, rows, events in closed:
