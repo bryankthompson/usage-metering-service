@@ -164,8 +164,8 @@ Round 1 had 9 major entries but 8 distinct problems: the same-second cancel was 
 ## 7. What each layer covered
 
 - Review: models reviewed the code (DRC, the advisor, the red-team lanes) and the operator read five functions on the money and
-  entitlement path (section 8). Reviewers found real defects, and a later reader found others: the high-effort review of the
-  entitlements slice did not catch the grace-window slide that dev A found by reading.
+  entitlement path (section 8). Reviewers found real defects, and a later reader found more, such as the grace-window
+  slide.
 - The platform adapter (`seekrflow`) is tested against hand-written fixtures and a stand-in server (no API key existed).
 - The load check is `scripts/flood.py` (600 requests from 150 clients), with a few one-off red-team measurements.
 - The review reports are in [docs/reviews/](reviews/README.md) as written at the time; their line numbers point at the commit
