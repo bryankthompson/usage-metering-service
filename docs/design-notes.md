@@ -7,20 +7,20 @@ and tied to the line in the existing code where it would attach. The "estimate" 
 
 The rule: write the fact down first, derive everything else from it, and when unsure, deny.
 
-- **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (`db/001_usage.sql:23-32`, function `usage_events_append_only`).
+- **Append-only log first.** `usage_events` rejects row UPDATE and DELETE by trigger (function `usage_events_append_only` and trigger `usage_events_no_change` in `db/001_usage.sql`).
 - **Rollups derived.** `AGGREGATE_HOUR` sums the log per tenant, model and hour (`app/rollup.py`) and `app.reconcile`
   recomputes it with its own SQL to check it (`docs/reconcile.md`).
-- **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (`db/002_billing.sql:14-23`, function `price_versions_immutable`;
-  the INSERT inside `add_price_version`, `app/pricing.py:55-56`; the function starts at :44). Money is integer micro-USD (`docs/billing.md`).
-- **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`require_entitlement`, `app/edge.py:52-64`).
+- **Prices versioned.** A database trigger rejects row UPDATE and DELETE of a stored price version, but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger); a new price is a new version (function `price_versions_immutable` and trigger `price_versions_no_change` in `db/002_billing.sql`;
+  the INSERT inside `add_price_version` in `app/pricing.py`). Money is integer micro-USD (`docs/billing.md`).
+- **The gate fails closed.** Any entitlement that is missing, not active, past grace or unreadable denies (`require_entitlement` in `app/edge.py`).
 
 ## 2. Where things would attach (NOT BUILT, except the columnar store)
 
 **A queue or stream in front of ingest.** The seam is the single `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
-(`INSERT_EVENT`, `app/ingest.py:59-66`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
+(`INSERT_EVENT` in `app/ingest.py`). A consumer would call the same insert, so a redelivery is a duplicate, not a second event. What
 changes: `POST /v1/usage` would publish and answer once the broker has the message, so a 201 would mean "queued", not "stored"
 (today 201 means committed, `_store` in `app/ingest.py`), and the `late` flag could not be returned to the caller. What stays: the log,
-the shared hour lock taken by the consumer (`lock_hour_shared`, called in `_store`) and the rollup. The 422 checks (`tenant_id`, `idempotency_key` and `model` capped at 200 characters, `MAX_TEXT` at `app/ingest.py:53` and the `Text` type at `:81`) would have to
+the shared hour lock taken by the consumer (`lock_hour_shared`, called in `_store`) and the rollup. The 422 checks (`tenant_id`, `idempotency_key` and `model` capped at 200 characters, `MAX_TEXT` and the `Text` type in `app/ingest.py`) would have to
 run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
@@ -48,7 +48,7 @@ secrets in place of the fake `STRIPE_WEBHOOK_SECRET` in the file. No manifests a
 same shape as the `POST /v1/usage` body, with the same idempotency keys. The file is carried out of the boundary and imported
 through the same insert, so importing it twice is safe (replay-safe by the key). What stays: everything after the insert.
 The limit: an event for an hour that is already closed here is stored and flagged `late = true` and is never billed
-(the `EXISTS (SELECT 1 FROM closed_hours ...)` in `INSERT_EVENT`, `app/ingest.py:62-63`; `docs/ingest.md`). A real design needs a late-adjustment rule, such as a credit or debit line on a later
+(the `EXISTS (SELECT 1 FROM closed_hours ...)` in `INSERT_EVENT` in `app/ingest.py`; `docs/ingest.md`). A real design needs a late-adjustment rule, such as a credit or debit line on a later
 invoice. That rule is NOT designed.
 
 **Pushing usage to a payment provider.** The seam is the closed rollup rows. It needs a table of pushed hours, an idempotency
@@ -64,8 +64,8 @@ provider today (`README.md`, "Not built").
 | Grace counted from the first failure that arrives | Stripe retries one failed invoice for days; letting each retry move the window kept a tenant allowed through the whole retry period (found in cross-review, `docs/build-log.md`, 16:01; `docs/billing.md`). | A new window starts only after an `active` subscription event clears the old one; `invoice.paid` does not (`docs/billing.md`). It is Stripe's first failure only when delivery order equals creation order. |
 | One subscription per tenant assumed | A guard for two subscriptions bought nothing inside that assumption and opened a fail-open case under out-of-order events (`docs/build-log.md`, 16:20). | Deleting either of two subscriptions denies the tenant (`docs/billing.md`). |
 | Unknown Stripe status means canceled | Only `active`, `trialing` and `past_due` grant access; unknown means deny (`STATUS_MAP` and its lookup, `app/webhooks.py:22-23,137-139`; `docs/build-log.md`, 15:32). | A new Stripe status that should grant access denies until the map is changed. |
-| Prices as append-only versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable`, `db/002_billing.sql:14-23`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
-| The edge reads the entitlement on its own connection checkout | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement`, `app/edge.py:39-40,52-57`); a handler in `app/main.py:39-47` now also answers 503 for a database that dies after the edge check. | One extra short checkout from the bounded connection pool per request (`DB_POOL_MAX`, `docs/ingest.md`). |
+| Prices as append-only versions | A past charge can be re-rated at the price in force then; a trigger enforces it (`price_versions_immutable` in `db/002_billing.sql`), but the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger). | A wrong price is fixed by a new version, not an edit; no admin API exists. |
+| The edge reads the entitlement on its own connection checkout | A database that is down fails at the edge as 503 and never lets the request through (`require_entitlement` in `app/edge.py`); a handler in `app/main.py:39-47` now also answers 503 for a database that dies after the edge check. | One extra short checkout from the bounded connection pool per request (`DB_POOL_MAX`, `docs/ingest.md`). |
 | Hand-run live checks instead of a CI stack | The demo and the compose runs were done by hand on throwaway projects (`docs/build-log.md`, 16:23, 16:34); CI runs only the tests. The log gives no further reason. | Compose and the demo are not checked on every merge. |
 
 ## 4. A day against a week
