@@ -36,6 +36,8 @@ CI runs this script on every pull request and push to `main`, as the smoke steps
 healthcheck on `/healthz`, so `--wait` returns when it answers), polls `/healthz` for up to 30 seconds and fails loudly if it
 does not answer, starts `scripts/stand_in_inference.py` in the background (stopped when the script ends), runs
 `scripts/scenario.py`, and prints the seconds each stage took and the total. The times are measured on each run; none is promised.
+Run on its own, `scripts/scenario.py` needs the stand-in inference server already running: start
+`python3 scripts/stand_in_inference.py --port 8089` in another terminal first (`--stand-in-port` on the scenario picks another port).
 
 The scenario plays three tenants (active, past_due in grace after `invoice.payment_failed`, canceled). The two paying tenants make
 inference calls through the `seekrflow` adapter's functions (`app/seekrflow.py`), so tokens in and out come from response bodies: chat with

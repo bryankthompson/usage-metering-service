@@ -5,6 +5,7 @@ Three tenants (active, past_due in grace, canceled). Each paying tenant makes in
 functions (app/seekrflow.py) against a stand-in inference server, so the usage comes from response bodies. The script
 then works out the expected micro-USD itself, with its own integer arithmetic, and compares it with
 GET /v1/tenants/{id}/charges. Any mismatch prints both numbers and exits 1; so does drift in `python -m app.reconcile`.
+Run alone, it needs the stand-in running: `python3 scripts/stand_in_inference.py --port 8089` (scripts/up starts it).
 
     python3 scripts/scenario.py [--stand-in-port 8089]
     SEEKR_API_KEY=... python3 scripts/scenario.py --live      (calls the real service; never run, no key exists)
