@@ -213,6 +213,8 @@ def _charge_pass(conn: psycopg.Connection, tenant_id: str, start: datetime, end:
                 page.append({"model": model, "hour_start": row["hour_start"], "tokens_in": row["tokens_in"],
                              "tokens_out": row["tokens_out"], "price_version": version["version"], "micros": micros})
                 last = (row["hour_start"], model)
+    if deadline is not None and time.monotonic() > deadline:     # the last row may have been the slow one
+        raise psycopg.errors.QueryCanceled("the charges pass ran past the statement timeout")
     if unpriced:                                     # all or nothing: no partial bill, whichever page was asked for
         raise NoPrice(_unpriced_message(unpriced))
     if after and (before_count, before_micros) != (after.count_before, after.micros_before):
@@ -282,7 +284,9 @@ def decode_cursor(text: str, tenant_id: str, start: datetime, end: datetime) -> 
 
 
 CURSOR_FIELDS = ("t", "s", "e", "h", "m", "n", "u")
-CURSOR_MAX_LENGTH = 1024
+# Worst case: tenant and model of MAX_TEXT astral characters, each escaped as a 12-character surrogate pair in the JSON,
+# plus the fixed fields, then base64's 4/3. Under 8192, so every cursor the service issues is one it accepts.
+CURSOR_MAX_LENGTH = 8192
 
 
 def _utc_text(value: datetime) -> str:
