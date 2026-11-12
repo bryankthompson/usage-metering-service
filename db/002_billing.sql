@@ -31,11 +31,25 @@ CREATE TABLE IF NOT EXISTS entitlements (
     payment_failed_at      TIMESTAMPTZ,
     grace_until            TIMESTAMPTZ,
     last_event_at          TIMESTAMPTZ,            -- `created` of the newest Stripe event applied: older events never overwrite
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT entitlements_status_check CHECK (status IN ('active','past_due','canceled'))
 );
 
 -- Upgrade for databases created before last_event_at existed.
 ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ;
+
+-- Upgrade for databases created before the status CHECK existed (CREATE TABLE IF NOT EXISTS leaves an old table alone).
+-- It is added only when missing, so a second run takes no lock. A legacy row outside the three values makes this fail
+-- loudly; find such rows with:
+--   SELECT tenant_id, status FROM entitlements WHERE status NOT IN ('active','past_due','canceled');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'entitlements_status_check' AND conrelid = 'entitlements'::regclass) THEN
+        ALTER TABLE entitlements ADD CONSTRAINT entitlements_status_check
+            CHECK (status IN ('active','past_due','canceled'));
+    END IF;
+END $$;
 
 -- One row per Stripe event handled: a redelivered webhook changes nothing the second time.
 CREATE TABLE IF NOT EXISTS stripe_events (

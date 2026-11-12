@@ -76,8 +76,22 @@ def test_past_due_with_no_grace_window_is_402(client, conn):
     assert client.get("/probe", headers=HEADERS).status_code == 402
 
 
-def test_unknown_status_is_402(client, conn):
-    entitle(conn, "something_new")
+def test_unknown_status_is_402(client, monkeypatch):
+    # The schema refuses such a row (tests/test_entitlements_status_check.py), so the row the edge reads is stubbed.
+    class Stub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, *args):
+            return self
+
+        def fetchone(self):
+            return {"status": "something_new", "grace_until": None}
+
+    monkeypatch.setattr(edge, "connect", Stub)
     assert client.get("/probe", headers=HEADERS).status_code == 402
 
 
