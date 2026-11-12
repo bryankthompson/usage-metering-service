@@ -46,11 +46,13 @@ is never rated as zero. A rate is `(tokens_in * input_price + tokens_out * outpu
 arithmetic, rounded half up once. `GET /v1/tenants/{tenant_id}/charges` rates each hourly rollup row at the price in
 force at the start of its hour, so a price change applies from the first hour that starts at or after its effective time
 (a version effective at 10:30 applies from the 11:00 hour). Nothing stores a bill. Charges cover closed hours only:
-`unclosed_hours` in the answer lists the hours in the range that hold usage but are not closed yet (the earliest 100), so a
-total with a non-empty list is partial (100 entries means at least 100). Use `start` and `end` on UTC hour boundaries: an
+`unclosed_hours` in the answer lists the hours in the range that hold usage but are not closed yet (the earliest 100, and
+`unclosed_hours_truncated` says when there were more), so a total with a non-empty list is partial. A range with more than
+10,000 lines is read in pages (`limit`, `cursor`): every page carries the whole range's `total_micros`, and the lines of all
+pages must add up to it (docs/billing.md, Paging). Use `start` and `end` on UTC hour boundaries: an
 hour is in or out of a range by its start, so a range that cuts an hour includes or drops all of it. **403** for another tenant, **422** for a naive timestamp, a `start` or `end` that is
-not ISO 8601 text, `start >= end`, or a range wider than 366 days, **409** when a row has no price in force (the message
-names the models without one, with the first hour of each; past 20 it says how many more). Details: [docs/billing.md](billing.md).
+not ISO 8601 text, `start >= end`, a range wider than 366 days, or a `limit`, `cursor` or unpaged range that breaks the paging rules, **409** when a row has no price in force (the message
+names the models without one, with the first hour of each; past 20 it says how many more) or when the range changed under a cursor. Details: [docs/billing.md](billing.md).
 
 **5. Stripe test-mode webhooks set the entitlement.** `POST /v1/stripe/webhook` (`app/webhooks.py`) checks
 the `Stripe-Signature` header on the raw body with `STRIPE_WEBHOOK_SECRET` before it touches the database:
