@@ -27,6 +27,9 @@ Two things in the output are not faults. Step 4 makes the api log two WARNING li
 is required`. And step 6 prints the rollup's own `closed hour=...` line right before the script's own `step 6: rollup -> closed hour=...`
 line, so the hour appears twice.
 
+CI runs this script on every pull request and push to `main`, as the smoke steps at the end of the `test` job: `docker compose up -d --build --wait`,
+`scripts/demo.sh`, then `docker compose down -v`. There the db publishes port 5433, because the job's own postgres service holds 5432.
+
 ## One command: `scripts/up`
 
 `scripts/up` goes from a cold checkout to a priced, checked result. It runs `docker compose up -d --build --wait` (the api has a

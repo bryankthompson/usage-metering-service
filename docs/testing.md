@@ -10,7 +10,7 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 |--|--|--|--|
 | Tests, real Postgres 16 | `scripts/test` | the last line starts `N passed` (read N there; this file does not copy it; see the warning note below) | yes: `uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92` |
 | One file | `scripts/test tests/test_attack_ingest.py` | same | (part of the above) |
-| End to end demo | `docker compose up -d --build`, then `scripts/demo.sh` | prints `demo ok` (price, signed webhook, usage, rollup, charges) | no |
+| End to end demo | `docker compose up -d --build`, then `scripts/demo.sh` | prints `demo ok` (price, signed webhook, usage, rollup, charges) | yes: the smoke steps at the end of `test` |
 | Reconcile | `docker compose exec -T rollup python -m app.reconcile` | exit 0; 1 = drift, 2 = bad argument (docs/reconcile.md) | no |
 | Burst | `python3 scripts/flood.py` | 300 x 201, 300 x 200, no new traceback (600 requests, 150 clients) | no |
 | Database outage | `scripts/outage-check.sh` | 503 while the db is stopped, 201 after, earlier row still there | no |
@@ -24,10 +24,16 @@ The test run ends `N passed, 1 warning`: a Starlette deprecation notice about th
 instead"). It does not come from this code and is harmless.
 `scripts/test` prints a WARNING when an older shared `metering-test-db` publishes its port beyond 127.0.0.1 (it holds test data
 only). Run `docker rm -f metering-test-db` when no test run is in progress; the next `scripts/test` recreates it on 127.0.0.1.
-CI (`.github/workflows/ci.yml`) runs, on every pull request and push to `main`, three jobs: `test` (`uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92`),
-`lint` (`uvx ruff@0.8.6 check .`, rules F and E9 from `ruff.toml`) and `docker` (`docker build .` and `docker compose config -q`).
+CI (`.github/workflows/ci.yml`) runs one job, `test`, on every pull request and push to `main`; the merge gate reads only the check named `test`, so every check is a step of it. The steps, in order:
+1. `uvx ruff@0.8.6 format --check --diff .` (line length 120, from `ruff.toml`); to reformat, run `uvx ruff@0.8.6 format .`.
+2. `uvx ruff@0.8.6 check .` (rules F and E9 from `ruff.toml`).
+3. `uv run --with mypy==2.4.1 mypy app`, the type checker on `app/` (non-strict, settings in `mypy.ini`, a stale `# type: ignore` fails).
+4. `uv run --with pytest-cov pytest -q --cov=app --cov-fail-under=92`, pytest with the 92% coverage floor.
+5. `docker build -t usage-metering-service:ci .`, the image build.
+6. `docker compose config -q`, the compose file check.
+7. The smoke: `docker compose up -d --build --wait` (the stack's db publishes port 5433, because the job's own postgres service holds 5432), then `scripts/demo.sh`, which prints `demo ok`, then `docker compose down -v`. The compose logs print when a smoke step fails.
+The flood and outage scripts and `app.reconcile` are run by hand.
 `.github/workflows/audit.yml` runs pip-audit weekly, by hand and when `uv.lock` or `pyproject.toml` changes; it is not a required check.
-`test` also starts with `uvx ruff@0.8.6 format --check --diff .` (line length 120, from `ruff.toml`); to reformat, run `uvx ruff@0.8.6 format .`. Then `uv run --with mypy==2.4.1 mypy app` runs the type checker on `app/` (non-strict, settings in `mypy.ini`, a stale `# type: ignore` fails). The demo, flood and outage scripts are run by hand and are not in CI.
 `pre-commit install` (with `uvx pre-commit` or pre-commit installed) makes git run the same ruff lint and format checks before each commit; it rewrites nothing.
 
 ## 2. What the first round of tests and the review missed
@@ -100,8 +106,8 @@ These were attacked and held; the test stays because the failure would be silent
 - Stripe: signatures are made locally with a fake secret; no call to Stripe, no real platform call, test mode only.
 - Load beyond the flood's 600 requests. (The 64 KiB body cap on `/v1/usage` and the webhook's 1 MiB cap are tested:
   `tests/test_usage_body_cap.py`.)
-- The demo twice on one stack (the second run picks the previous hour) and `docker compose up` from nothing: run by hand, not in
-  `scripts/test`.
+- The demo twice on one stack (the second run picks the previous hour): run by hand. CI runs the demo once, on a stack it builds from
+  nothing (the smoke steps).
 - Time: the edge clock is replaced in tests; nothing sleeps through a real grace period.
 
 | Known limit (found, not fixed) | Where it is written down |

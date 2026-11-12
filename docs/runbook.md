@@ -292,7 +292,7 @@ line is `"POST /v1/usage HTTP/1.1" 413` in
 | Billed amount differs by 1 micro | per-line half-up rounding, summed once per line | 3 |
 | 503 `entitlement check unavailable` | database stopped or not answering | 11 |
 | 503 `database unavailable`, `retry-after: 1` | a lock wait over 2 s or the db dying | 11 |
-| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included; on `/v1/usage/batch` also many hours (each lock wait up to 2 s) or very long, near-identical text fields | 11 |
+| 504 `query timed out`, no `retry-after` | a statement over 15 s on any route after the entitlement edge, `/v1/usage` included; on `/v1/usage/batch` also very long, near-identical text fields | 11 |
 | No answer at all, `/healthz` still 200 | the db container is paused (frozen), not stopped | 11 |
 | 413 on `/v1/usage` | request body over 64 KiB | 12 |
 | 413 on `/v1/usage/batch` | request body over 7,363,012 bytes | 12 |
