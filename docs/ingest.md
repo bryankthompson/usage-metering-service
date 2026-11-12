@@ -85,6 +85,12 @@ Python before the database is opened, because the INSERT would otherwise keep an
 200-character non-BMP text fields (12 bytes per character as the `\ud83d\ude00` escape Python's `json.dumps` writes), both token counts 10^12 and the longest timestamp spelling,
 in `json.dumps` spacing. A body one byte over is a 413; padding such as extra fractional digits or whitespace can push a valid batch over it, as on the single route.
 
+**Memory of one maximal request (measured 2026-11-11).** One request carrying exactly 7,363,012 bytes (1000 maximal events), sent through the real app with
+`TestClient`, parsed and validated (1000 `UsageEvent` objects) and stopped by a 403 tenant mismatch on the first event (the edge replaced by a fixed tenant, so no
+database work), peaked at 17.0 MiB of Python allocations (`tracemalloc`, peak above the baseline, three runs, 17.0 MiB each; about 2.4 times the body). The peak
+includes the test client's own copy of the body, so the server's share is somewhat lower. Times 40 (the anyio worker threads, all
+holding such a request at once) that is 680 MiB (0.66 GiB), the worst case for memory held by request bodies. It is the measured peak of one request multiplied, not a measurement of 40 concurrent requests.
+
 **Measured (2026-11-11, Postgres 16 in a container on a WSL2 laptop; times move with the machine, no throughput claim).**
 - Validating the body (pydantic plus the checks above, no database) took about 1.5 ms for 1000 ordinary events and about 3 ms for 1000
   maximal ones, so it runs on the request thread; it is not moved to a worker.
