@@ -4,6 +4,21 @@ import pytest
 
 from app import db
 
+# This process's pool sessions carry their own name, so a dev server (same app, same database) is not counted as ours.
+# Set before any pool opens; tests/test_pool.py reads it at import for its CLEAN settings.
+db.APPLICATION_NAME = f"usage-metering-api-test-{os.getpid()}"
+
+
+def own_pool_sessions(conn, *, state_like="%"):
+    """How many sessions this test process's request pool holds on the database (in a state matching state_like).
+    The commit first: pg_stat_activity is a snapshot kept until the transaction ends, so without it every poll repeats the first answer."""
+    conn.commit()
+    return conn.execute(
+        "SELECT count(*) AS n FROM pg_stat_activity WHERE application_name = %s AND pid <> pg_backend_pid()"
+        " AND state LIKE %s",
+        (db.APPLICATION_NAME, state_like),
+    ).fetchone()["n"]
+
 
 def database_url_problem(environ):
     """The message to stop with when DATABASE_URL is unset or empty, else None."""

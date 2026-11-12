@@ -186,6 +186,13 @@ holds the shared hour lock would block that hour's close for as long as it stays
   of millions of rows reach 15 s). `db.connect()` gives the connection the request path's 15 s statement timeout, and `apply_schema` runs under
   it, so a build that takes longer is cancelled (`QueryCanceled`, checked: nothing is applied, the one transaction rolls back, and the index
   is not left half built). For the first apply on a large table use `db.connect(statement_timeout_ms=0)`, which is what the rollup uses.
+- **The rollup hour-range index (`usage_rollups_hourly_tenant_hour`, `(tenant_id, hour_start, model)`).** The charges read ranges on
+  `hour_start`, and the primary key leads with `model`, so its plan read the tenant's whole key range. Measured (2026-11-12, one
+  machine, Postgres 16 in docker, 501,600 rows for one tenant: 114 models x 4,400 hours): a 1-day range returned 2,736 rows and took 20 ms
+  through the primary key (about 4,100 index pages, the whole tenant range) and 1.1 ms through the new index (about 2,750 buffers in all);
+  the planner chose a sequential scan of all 501,633 rows (24.5 ms) before the index existed. A 1-week range returned 19,152 rows. Building
+  it on an existing database needs a manual `apply_schema` (README.md, Docker section); the build takes a write lock on
+  `usage_rollups_hourly`, so closing hours and ingests that write rollups wait until it finishes. Use `db.connect(statement_timeout_ms=0)` for the first apply on a large table.
 
 **Timeouts:** every connection gives up connecting after 5 s; request-path connections cancel a statement after 15 s,
 so a database that stops accepting connections is a 503, and a statement past 15 s is a 504 `query timed out` on every route after the entitlement edge (the edge answers 503 for its own read; `POST /v1/usage` re-raises it to the handler in `app/main.py`). A lock wait over 2 s and a failed connection stay 503. `/healthz` is an `async` route that touches
