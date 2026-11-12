@@ -35,11 +35,9 @@ def test_apply_schema_adds_the_constraint_to_an_existing_table(conn):
 
 
 def test_apply_schema_fails_loudly_on_a_legacy_row(conn):
+    # never committed: the drop and the bad row live in this transaction only, so an interrupted run cannot poison the shared database
     conn.execute("ALTER TABLE entitlements DROP CONSTRAINT entitlements_status_check")
     insert(conn, "something_new")
-    conn.commit()
     with pytest.raises(psycopg.errors.CheckViolation):
         db.apply_schema(conn)
     conn.rollback()
-    conn.execute("DELETE FROM entitlements")        # leave the shared database as the next test's fixture expects
-    db.apply_schema(conn)
