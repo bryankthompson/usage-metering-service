@@ -24,8 +24,8 @@ the shared hour lock taken by the consumer (`lock_hour_shared`, `app/ingest.py:1
 run at the producer or the consumer. Failure added: a message the consumer cannot
 insert (for example a 409 payload mismatch) needs a dead-letter place; today the caller sees it.
 
-**A columnar store for rollups at scale (BUILT as an optional mirror, not at scale).** After `close_hour` commits (`conn.commit()`,
-`app/rollup.py`) the same rows are written to ClickHouse when `CLICKHOUSE_URL` is set (`app/mirror.py`, `docs/clickhouse.md`). The log
+**A columnar store for rollups at scale (BUILT as an optional mirror, not at scale).** After the hours are committed (`conn.commit()` in `close_hour`;
+`close_due_hours` mirrors them in one pass after closing all of them, `app/rollup.py`) the same rows are written to ClickHouse when `CLICKHOUSE_URL` is set (`app/mirror.py`, `docs/clickhouse.md`). The log
 stays the source and the Postgres rollup stays the bill. Limits: a derived copy, best effort at close time (a failure is logged and
 never touches the close), recovered by `python -m app.mirror --backfill`, no authentication on the local ClickHouse, single node.
 Comparison: `--export-actuals` writes the totals as the file `app.reconcile --actuals` reads; drift above tolerance exits 1. Not

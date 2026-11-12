@@ -62,11 +62,12 @@ def _require_aware(ts: datetime, name: str) -> None:
         raise ValueError(f"{name} must be timezone-aware, got {ts!r}")
 
 
-def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int] | None:
+def close_hour(conn: psycopg.Connection, hour_start: datetime, defer_mirror: list | None = None) -> tuple[int, int] | None:
     """Close one UTC hour. Returns (rollup rows written, events counted), or None if it was already closed.
 
     Commits (or rolls back and re-raises). Closing an hour twice changes nothing. After the commit, when
     CLICKHOUSE_URL is set, the rows are copied to ClickHouse; that copy can fail without failing the close (app/mirror.py).
+    With `defer_mirror` (a list), the copy is not made here: (hour, rows) is appended to it for the caller to mirror.
     """
     _require_aware(hour_start, "hour_start")
     hour = hour_start.astimezone(timezone.utc)
@@ -86,7 +87,10 @@ def close_hour(conn: psycopg.Connection, hour_start: datetime) -> tuple[int, int
     except Exception:
         conn.rollback()
         raise
-    mirror.mirror_rows(hour, written)  # best effort, after the commit: never raises, never touches the close
+    if defer_mirror is not None:
+        defer_mirror.append((hour, written))
+    else:
+        mirror.mirror_rows(hour, written)  # best effort, after the commit: never raises, never touches the close
     return len(written), sum(r["event_count"] for r in written)
 
 
@@ -109,11 +113,16 @@ def close_due_hours(
     asks it for a new one first; if that raises, that hour fails like any other (logged, in `failed`) and the next hour
     asks again. The caller still owns `conn` and closes it (closing a dead one is harmless); this function closes the
     connections it got from `reconnect`. The failed hour is not retried here.
+
+    The ClickHouse copy is off this loop's path: every due hour is closed first, then the closed hours are mirrored in
+    one pass (`mirror.mirror_hours`), which stops at the first failure that means ClickHouse is down. The mirror never
+    changes what this returns or what is in `failed`.
     """
     _require_aware(now, "now")
     hours = [r["hour_start"] for r in conn.execute(DUE_HOURS, {"cutoff": now - grace}).fetchall()]
     conn.commit()
     closed = []
+    to_mirror = []  # (hour, rows) of the hours closed here, mirrored after the loop
     opened = None  # the connection last obtained from `reconnect`, which this function must close
 
     def fail(hour: datetime, err: Exception) -> None:
@@ -133,7 +142,7 @@ def close_due_hours(
                     opened.close()
                 conn = opened = fresh
             try:
-                result = close_hour(conn, hour)
+                result = close_hour(conn, hour, defer_mirror=to_mirror)
             except Exception as err:  # close_hour has rolled back: nothing of this hour is written
                 fail(hour, err)
                 continue
@@ -142,6 +151,7 @@ def close_due_hours(
     finally:
         if opened is not None:
             opened.close()
+    mirror.mirror_hours(to_mirror)
     return closed
 
 
