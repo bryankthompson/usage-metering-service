@@ -95,7 +95,7 @@ request queued for a worker thread holds its parsed events: the 40 worker thread
 the app does not bound that number (uvicorn's connection limit and a proxy in front are the only bounds). For example, 40 such requests would hold about 680 MiB, but
 that is an illustration, not a measurement and not a maximum. The same holds for the single route at its 64 KiB cap, with a much smaller figure per request.
 
-**Measured (2026-11-11, Postgres 16 in a container on a WSL2 laptop; times move with the machine, no throughput claim).**
+**Measured (2026-11-11, Postgres 16 in a container on a WSL2 laptop; times move with the machine; throughput is in the table under the connection pool).**
 - Validating the body (pydantic plus the checks above, no database) took about 1.5 ms for 1000 ordinary events and about 3 ms for 1000
   maximal ones, so it runs on the request thread; it is not moved to a worker.
 - **1000 maximal events do not fit in the statement timeout.** 1000 events whose three text fields are near-identical 200-emoji strings exceeded the 15 s
@@ -222,8 +222,26 @@ they had none). Tests: `tests/test_pool.py`.
 A flood of 300 + 300 requests (`scripts/flood.py`, 150 clients, a hand-run check and not a load test; the peak is sampled, so it is
 approximate): before the pool the wall time was 4.51 s and 4.32 s with a sampled peak of 35 and 34 backends; with the pool at 40
 it was 3.03 s and 2.79 s with a peak of 36 and 40; with `DB_POOL_MAX=10` the peak was 10. Every run gave 300 x 201 and 300 x 200.
-Two runs each on one machine do not show a gain in throughput; what they show is that the cap holds. `scripts/outage-check.sh`
+The cap holds, and throughput with and without the pool is in the table below. `scripts/outage-check.sh`
 passed against the pooled stack (503 while the db was stopped, 201 after, no API restart).
+
+**Throughput, measured on this machine at these commits (2026-11-12).** WSL2 laptop, `postgres:16` container, default settings, the api
+in its compose container. `old` is `e4a4bf8` (the commit before the pool); `new` is `a616ac0` (main). Command per cell:
+`API_PORT=<port> python3 scripts/throughput.py --mode single|batch --clients C --events 2000|5000 --batch-size 100 --warmup 1 --runs 5`.
+Single sends 2000 events with `POST /v1/usage`, batch sends 5000 events in 50 requests of 100 with `POST /v1/usage/batch`; every key is new,
+and every request answered 201. Each cell is one warm-up run and 5 timed runs; cells alternate old, new, and each started with the
+1-minute load average under 4. Events per second, median (min..max) over the 5 runs, and the median request latency p50 / p99 in ms:
+
+| Mode | Clients | old events/s | new events/s | old p50 / p99 ms | new p50 / p99 ms |
+|--|--|--|--|--|--|
+| single | 1 | 64 (62..65) | 203 (182..206) | 14.9 / 29.0 | 4.7 / 8.8 |
+| single | 8 | 153 (128..159) | 278 (264..283) | 50.8 / 75.0 | 27.9 / 43.7 |
+| single | 32 | 160 (126..165) | 308 (303..324) | 199.3 / 270.9 | 103.0 / 149.9 |
+| single | 150 | 155 (132..164) | 293 (281..306) | 957.0 / 1194.5 | 503.0 / 588.8 |
+| batch of 100 | 1 | 4893 (4728..5399) | 10571 (10185..11516) | 19.0 / 36.8 | 8.7 / 17.7 |
+| batch of 100 | 8 | 12168 (11685..13876) | 20939 (18167..21630) | 63.4 / 89.9 | 37.7 / 49.8 |
+
+These figures are what `scripts/throughput.py` printed on this machine at these commits; the client, the api and Postgres share the one machine.
 Known limit: a database that freezes after a connection was made (a paused container) is not bounded, because the
 statement timeout is enforced by the server and the client has no timer of its own; the settings query right after
 connecting is likewise not bounded (found by review, not fixed).

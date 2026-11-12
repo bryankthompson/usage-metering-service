@@ -13,11 +13,12 @@ re-run or read in the repo; where a claim lives only in a session handoff (not s
 | End to end demo | `docker compose up -d --build`, then `scripts/demo.sh` | prints `demo ok` (price, signed webhook, usage, rollup, charges) | yes: the smoke steps at the end of `test` |
 | Reconcile | `docker compose exec -T rollup python -m app.reconcile` | exit 0; 1 = drift, 2 = bad argument (docs/reconcile.md) | no |
 | Burst | `python3 scripts/flood.py` | 300 x 201, 300 x 200, no new traceback (600 requests, 150 clients) | no |
+| Throughput | `python3 scripts/throughput.py --mode batch --clients 8` | prints per run the events per second and latency, exit 0 (the measured table is in docs/ingest.md) | no |
 | Database outage | `scripts/outage-check.sh` | 503 while the db is stopped, 201 after, earlier row still there | no |
 
 `scripts/test` starts a throwaway Postgres container and gives each checkout its own database (or uses `DATABASE_URL`).
 Bare `pytest` exits 2 before any test when `DATABASE_URL` is unset, because the tests truncate the database they connect to and the default is the live compose database on port 5432: use `scripts/test`.
-The last four rows need a live `docker compose up`; `API_PORT` and `DB_PORT` pick the ports, `COMPOSE_PROJECT_NAME` the project.
+The last five rows need a live `docker compose up`; `API_PORT` and `DB_PORT` pick the ports, `COMPOSE_PROJECT_NAME` the project.
 Needs on the host: docker compose v2 (`docker compose`, `up --wait`), `uv`, python3 and curl. Free ports: 8000 and 5432 for the
 stack, 5455 for the tests, or set `API_PORT`, `DB_PORT`, `TEST_DB_PORT`.
 The test run ends `N passed, 1 warning`: a Starlette deprecation notice about the test client's use of `httpx` ("install `httpx2`
