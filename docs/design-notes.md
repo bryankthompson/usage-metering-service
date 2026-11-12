@@ -36,9 +36,9 @@ built: any run at data volumes where the columnar store matters, a schedule for 
 (`compose.yaml:22-39`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:41-51`).
 `db` and `api` have a health check; `rollup` has none. The `api` one (`compose.yaml:34-38`) fetches `GET /healthz` from inside the
 container every 2 s (up to 30 retries), so `docker compose up --wait` returns when the API answers, not when its process starts;
-`/healthz` does not touch the database (`app/main.py:49-55`). The API answers 503 on
+`/healthz` does not touch the database (`app/main.py:59-65`). The API answers 503 on
 every route that uses the database when it is unreachable; `/healthz` does not touch it and keeps answering 200
-(`app/main.py:39-47,49-55`). It also answers 413 to a webhook body over 1 MiB
+(`app/main.py:39-47,59-65`). It also answers 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at
 `LOG_LEVEL` (default INFO) through `configure_logging` (`app/main.py:17-30`). A cluster would add liveness and readiness probes
 on `/healthz` (which does not touch the database), a CronJob or equivalent for the rollup instead of a sleeping loop, and

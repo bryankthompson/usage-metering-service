@@ -21,7 +21,7 @@ def connect(url: str | None = None, *, statement_timeout_ms: int | None = None) 
     """Open a connection that gives up after CONNECT_TIMEOUT_S, so a database that stops answering is a 503, not a hang.
 
     The default is the request path's: statements are cancelled after REQUEST_STATEMENT_TIMEOUT_MS (psycopg raises
-    QueryCanceled, an OperationalError, which the API answers with 503). The rollup close, reconcile and delinquent
+    QueryCanceled, which the API's app-wide handler answers with 504 "query timed out"). The rollup close, reconcile and delinquent
     pass `statement_timeout_ms=0` (no limit): a large hour legitimately takes longer.
 
     The session time zone is pinned to UTC for every connection, whatever PGTZ, the URL or the server says: the app reads
