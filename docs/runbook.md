@@ -54,7 +54,7 @@ Without the edge (a denied tenant), from the api container (one Python dict per 
     docker compose exec -T api python -c "import sys; from datetime import datetime as d; from app import db, pricing; c = db.connect(); \
     a = [sys.argv[1]] + [d.fromisoformat(x) for x in sys.argv[2:]]; l, t = pricing.charge_lines(c, *a); [print(x) for x in l]; \
     print('total_micros', t, 'unclosed_hours', [h.isoformat() for h in pricing.unclosed_hours(c, *a)])" $T 2026-11-10T23:00:00+00:00 2026-11-11T03:00:00+00:00
-    {'model': 'demo-model', 'hour_start': datetime.datetime(2026, 11, 10, 23, 0, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC')), ... 'micros': 6000}
+    {'model': 'demo-model', 'hour_start': datetime.datetime(2026, 11, 10, 23, 0, tzinfo=datetime.timezone.utc), ... 'micros': 6000}
     total_micros 6000 unclosed_hours ['2026-11-11T01:00:00+00:00']
 
 Surprises: `lines: []` means no closed rollup row in the period (hours still open, no events, or all late): `unclosed_hours`, then 5.
@@ -77,7 +77,8 @@ unless `--fail-on-unbilled`, then any of these makes it 1; `--json` prints one o
     reconcile: hours=2 rows=4 drift=0
 `actuals.jsonl` is the other source you compare against (the usage the customer or another system reports, which you write out yourself),
 one object per line: `tenant_id, model, hour, tokens_in, tokens_out`. Exit 1 = drift, 2 = bad argument or file
-(`--hour` must be a closed hour: `... is not a closed hour`). Drift lines (the summary reads `hours=1 rows=2 drift=1` and so on):
+(`--hour` must be a closed hour: `... is not a closed hour`). Drift lines (the summary reads `hours=1 rows=2 drift=1` and so on; the `not in closed_hours` line shows only without `--hour`
+(`--since` or neither), since an hour not in `closed_hours` is exit 2 with `--hour`):
 
     DRIFT tenant=demo-... model=demo-model hour=2026-11-10T23:00:00Z tokens_in rollup=3007 events=3000
     DRIFT ... events but no rollup row (events=(3000, 500, 2))
@@ -180,7 +181,7 @@ type, or a failed payment for a `canceled` tenant). The HTTP answer is `{"status
     2026-11-11 01:14:16,024 WARNING app.webhooks webhook tie after cancel: event='evt4_tie_late_active' type='customer.subscription.updated' tenant='tie-co' shares the second of the cancel and is stale
     2026-11-11 01:11:36,665 WARNING app.webhooks webhook refused: No signatures found matching the expected signature for payload
 A subscription event stamped with the same second as a cancel is `stale` (a tie never undoes a cancel: the `tie after cancel`
-line). Or use Stripe's own list of deliveries, which should show the response Stripe got (Stripe's side: not checked here, nothing in this repo calls Stripe). Refusals: 400 `invalid signature or payload` (bad signature),
+line). Or use Stripe's own list of deliveries, which should show the response Stripe got (Stripe's side: not checked here, nothing in this repo calls Stripe). Refusals: 400 `missing Stripe-Signature header` (no header), 400 `invalid signature or payload` (bad signature),
 413 `webhook body too large` (over 1 MiB), 503 `database unavailable` (database down; step 11), 503 `webhook secret not configured`
 (no or blank `STRIPE_WEBHOOK_SECRET`) or 503 `grace period not configured` (`GRACE_PERIOD_HOURS` out of range). A payment failure
 opens grace for `GRACE_PERIOD_HOURS` (default 72, 0 to 8760) from the FIRST failure; later retries do not extend it; an `active`
@@ -208,7 +209,8 @@ log as tenant data). Find who is in that hour (a sum past 9.2e18 tokens, from ev
 
     psql -c "SELECT tenant_id, model, count(*) AS events, sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out FROM usage_events
              WHERE date_trunc('hour', occurred_at, 'UTC') = '2026-11-10T20:00:00Z' AND NOT late GROUP BY 1, 2 ORDER BY 4 DESC"
-     demo-1794359437 | demo-model | 2 | 10000000000000000000 | 0
+     demo-1794359437 | demo-model | 9223373 | 9223373000000000000 | 0
+(illustrative: `tokens_in` is capped at 10^12 per event, so a sum past 9.2e18 takes about 9.2 million events in one hour)
 What to do: read `error=`. `bigint out of range`: no command closes it. The events are refused deletion by the append-only trigger; the trigger does not stop TRUNCATE, or the table owner or a superuser (who can disable the trigger): do not bypass it. The columns
 stay BIGINT until a developer widens them (docs/ingest.md, Known limit): ask whoever runs this service, with the `rollup failed` line and this output; until then the hour
 is not billed and stays in `unclosed_hours`. Any other error: fix the cause it names (the one reproduced here was a CHECK constraint added by hand
@@ -223,7 +225,8 @@ with the same numbers and `closed hour=...` prints:
     docker compose ps -a db ; docker compose logs api | grep -E "edge cannot read|unavailable"
 Two different 503s. `{"detail":"entitlement check unavailable"}` (no `Retry-After`) comes from the edge: the API cannot read the
 database. The log says why: `edge cannot read entitlements: failed to resolve host 'db'` (db stopped) or `... connection timeout
-expired` (db not answering; a new connection gives up after 5 s, measured with a paused db). Start or fix the db; the API needs
+expired` (db not answering; a new connection gives up after 5 s, measured with a paused db: 5.04 s with no load, 7.9 s with 50 clients
+retrying, because they queue for a worker thread; a stopped db answered in 4.0 s; a measurement from a walk of this runbook on 5dca15d, not a guarantee). Start or fix the db; the API needs
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
 `{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s, a statement over
@@ -245,7 +248,7 @@ setting have no `Retry-After` either (by reading `app/webhooks.py`).
 that is not running, so no timeout fires, and 40 of them take every worker thread; a new request that needs a thread waits too.
 Keepalive options do not end it (measured, `docs/ingest.md`). Fix: `docker compose unpause db`; the parked requests answer 503
 within seconds and can be resent. Or `docker compose restart api` (about 5 s): the parked requests are dropped, and new ones get
-503 `entitlement check unavailable` after 5 s until the db is back. Both measured with a paused db and 50 requests in flight.
+503 `entitlement check unavailable` after about 5 s (7.9 s with 50 clients retrying, walk on 5dca15d) until the db is back. Both measured with a paused db and 50 requests in flight.
 
 ## 12. 413 on /v1/usage
     python3 -c "print('x'*70000)" | curl -s -i -X POST $BASE/v1/usage -H 'Content-Type: application/json' --data-binary @- | sed -n '1p;$p'
