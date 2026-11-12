@@ -28,6 +28,8 @@ operations report gives no count), 3 major and 7 minor. The claims lens did not 
 
 **What was changed from the originals.** A header line was added to each report. Local checkout paths were shortened to the
 file or script name (the attack scripts named in the reports, such as `a1.py` or `wh.py`, are not in the repository). The
-platform adapter's name and its file names were replaced by "the platform adapter" and "the adapter's ..." because the
-repository keeps that name in the adapter's own files only, and one email address was replaced by words. Findings, counts and
-wording are otherwise as written. Line numbers in a report point at the commit it tested, not at today's tree.
+platform adapter's name and its file names were replaced by "the platform adapter" and "the adapter's ..." (at the time the
+repository kept that name in the adapter's own files only), and one email address was replaced by words. Findings, counts and
+wording are otherwise as written. Note, 2026-11-11: the operator decided to name the adapter everywhere; "the platform adapter" in
+these reports is `seekrflow` (`app/seekrflow.py`, `tests/test_seekrflow.py`, `docs/seekrflow.md`, its fixture files), and no live
+call to the real service was ever made. Line numbers in a report point at the commit it tested, not at today's tree.

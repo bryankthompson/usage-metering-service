@@ -81,8 +81,10 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
 Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
-a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored), a connection that takes more than 5 s to open and a
-statement that runs more than 15 s on the request path (the edge's own 503, "entitlement check unavailable", carries no `Retry-After`); the
+a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open
+(the edge's own 503, "entitlement check unavailable", carries no `Retry-After`). A statement that runs more than 15 s on the request path is
+**504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on the routes whose database error reaches the
+handler in `app/main.py`, such as the charges route and the webhook route; `POST /v1/usage` and the entitlement edge catch it themselves and still answer 503. The
 rollup, reconcile and delinquent runs have no statement timeout.
 
 **7. Two read-only reports.** `python -m app.reconcile` recomputes every closed hour from the raw log with its own SQL and
@@ -97,7 +99,7 @@ with their grace state (`--json`, `--fail-on-expired` for a cron job, `--at ISO`
 (`docker compose --profile analytics`); a failure there is logged and never touches the bill, `python -m app.mirror --backfill`
 recovers it, and `--export-actuals` feeds `app.reconcile --actuals` ([docs/clickhouse.md](docs/clickhouse.md)). It is a derived copy, not the bill.
 
-**9. A platform adapter, not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
+**9. A platform adapter (`seekrflow`), not run against the real service.** `app/seekrflow.py` turns the `usage` object of an inference
 response (chat, embeddings or the final stream chunk) into one usage event, with the response id as the idempotency key; a
 missing usage raises and is never counted as zero. It was built from the public API documentation and tested with
 hand-written fixtures, the real app and a local stand-in server. No call to the real service has been made: there is no key.
@@ -109,8 +111,8 @@ hand-written fixtures, the real app and a local stand-in server. No call to the 
 |--|--|--|--|
 | GET | `/healthz` | 200 `{"status": "ok"}` while the process is up (it says nothing about the database) | none; no edge check |
 | POST | `/v1/usage` | 201 `{"status": "accepted", "event_id", "late"}`, or 200 `{"status": "duplicate", "event_id", "late"}` | 400, 403, 409, 413, 422, 503; edge 401, 402, 503 |
-| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503; edge 401, 402, 503 |
-| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503; no edge check, the signature is the check |
+| GET | `/v1/tenants/{tenant_id}/charges?start=&end=` | 200 `{tenant_id, start, end, lines, total_micros, unclosed_hours}` | 403, 409, 422, 503, 504; edge 401, 402, 503 |
+| POST | `/v1/stripe/webhook` | 200 `{"status": "processed" \| "duplicate" \| "stale" \| "ignored"}` | 400, 413, 503, 504; no edge check, the signature is the check |
 
 Any route: **404** for an unknown path and **405** for a wrong method.
 
@@ -149,7 +151,7 @@ A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md
 
 - Correcting drift: `app.reconcile` reports a difference and changes nothing. (`app.mirror --backfill` only re-copies the optional ClickHouse mirror.)
 - ClickHouse at scale or in production: the mirror is a small optional copy (`docs/clickhouse.md`), run by hand on one local node.
-- Any call to the inference platform the adapter is written for (no key), and its per-model prices: the prices in the tests are illustrative.
+- Any call to the inference platform the adapter (`seekrflow`) is written for (no key), and its per-model prices: the prices in the tests are illustrative.
 - Cluster manifests, a dashboard, late adjustments and the other items listed in [docs/design-notes.md](docs/design-notes.md).
 - Pushing usage to Stripe, invoices, or any call to Stripe.
 - Gating inference: the edge controls recording usage and reading charges, not serving inference. `seekrflow live` calls the

@@ -34,7 +34,7 @@ does not answer, starts `scripts/stand_in_inference.py` in the background (stopp
 `scripts/scenario.py`, and prints the seconds each stage took and the total. The times are measured on each run; none is promised.
 
 The scenario plays three tenants (active, past_due in grace after `invoice.payment_failed`, canceled). The two paying tenants make
-inference calls through the adapter's functions (`app/seekrflow.py`), so tokens in and out come from response bodies: chat with
+inference calls through the `seekrflow` adapter's functions (`app/seekrflow.py`), so tokens in and out come from response bodies: chat with
 two models, and embeddings. It also sends a resend (200 duplicate), a late event (its hour is closed: 201 `late`, not billed) and a
 price change 30 minutes into the first hour (the hour is rated at the price in force at its start, so only the second hour sees
 it). The edge refuses the canceled tenant (402) and a request with no tenant header (401). It runs the rollup and reads
@@ -52,7 +52,7 @@ counts that vary per request but repeat for the same `--seed`. It prints `STAND-
 Everything the scenario shows about usage therefore proves the metering and billing path, not any real model's behaviour.
 
 `python3 scripts/scenario.py --live` skips the stand-in, needs `SEEKR_API_KEY` (it fails if missing and never prints it), prints
-`LIVE: calling the real service` and calls the platform's default base through the adapter. **That path has never run**: there
+`LIVE: calling the real service` and calls the platform's default base through the `seekrflow` adapter. **That path has never run**: there
 is no key. Treat it as untested.
 
 Ports: `API_PORT` and `DB_PORT` as above, `STAND_IN_PORT` (default 8089) for the stand-in. The pure parts (the expected-charge

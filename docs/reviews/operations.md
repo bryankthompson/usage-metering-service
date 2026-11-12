@@ -46,6 +46,8 @@ Files: app/rollup.py:93-100, compose.yaml:22-42.
 The rollup crashes with a bare driver traceback: no hour, no tenant. Neither `api` nor `rollup` has a compose `healthcheck`, and `api`
 `/healthz` does not check the DB (it answered 200 while every route returned 503 with the entitlements table missing). `docker compose ps`
 shows `Restarting (1)` for the poisoned rollup, but nothing a monitor can poll.
+
+> Note, 2026-11-11: since this report, compose.yaml gives `api` a healthcheck (compose.yaml:34-38); `rollup` still has none.
 Fix: log `rollup: closing hour=... failed` before re-raising; make /healthz run `SELECT 1` and add healthchecks.
 
 ## RT-operations-5  MINOR  charges has no range or result bound
