@@ -2,6 +2,8 @@
 
 > Review report as written at the time. File:line citations refer to the SHA named in the report, not to today's tree.
 
+> Note, 2026-11-11: in this report "the platform adapter" is seekrflow (app/seekrflow.py); no live call to the real service was ever made.
+
 Checkout: origin/main (da520b6). Live stack: own compose project `rt-security` (API 18401, DB 15401), removed with `down -v`.
 Attack scripts (not committed): seed.py, sig.py
 Summary: 0 blockers, 2 major, 2 minor, 2 notes.

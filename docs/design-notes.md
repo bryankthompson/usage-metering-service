@@ -33,8 +33,10 @@ built: any run at data volumes where the columnar store matters, a schedule for 
 
 **Containers and a cluster.** In `compose.yaml`: `db` is the Postgres 16 container with a `pg_isready` health check and
 `restart: unless-stopped` (`compose.yaml:15-20`); `api` is `uvicorn`, waits for a healthy `db` and has `restart: unless-stopped`
-(`compose.yaml:22-34`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:36-44`).
-Only `db` has a health check: `api` has none although the app has `GET /healthz` (`app/main.py:49-55`). The API answers 503 on
+(`compose.yaml:22-39`); `rollup` is `python -m app.rollup --every 3600` with `restart: unless-stopped` (`compose.yaml:41-51`).
+`db` and `api` have a health check; `rollup` has none. The `api` one (`compose.yaml:34-38`) fetches `GET /healthz` from inside the
+container every 2 s (up to 30 retries), so `docker compose up --wait` returns when the API answers, not when its process starts;
+`/healthz` does not touch the database (`app/main.py:49-55`). The API answers 503 on
 every route that uses the database when it is unreachable; `/healthz` does not touch it and keeps answering 200
 (`app/main.py:39-47,49-55`). It also answers 413 to a webhook body over 1 MiB
 (`app/webhooks.py:26,38`); both matter to whatever a cluster uses for probes and load balancing. `app.*` log lines show at

@@ -1,4 +1,4 @@
-# Platform adapter (`app/seekrflow.py`)
+# Platform adapter `seekrflow` (`app/seekrflow.py`)
 
 Turns the `usage` object of an inference response into one usage event for `POST /v1/usage`. The response `id` is the
 idempotency key, so a resend is a 200 `duplicate`. Standard library only. **No call to the real service has been made**
