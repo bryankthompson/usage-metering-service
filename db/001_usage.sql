@@ -46,3 +46,7 @@ CREATE TABLE IF NOT EXISTS usage_rollups_hourly (
     event_count BIGINT      NOT NULL,
     PRIMARY KEY (tenant_id, model, hour_start)
 );
+-- Serves the charges read (one tenant, an hour range). The primary key leads with model, so a range on hour_start read the
+-- tenant's whole key range. On an existing large table this takes a write lock on usage_rollups_hourly while it builds (it
+-- cannot be CONCURRENTLY: apply_schema runs in one transaction); docs/ingest.md.
+CREATE INDEX IF NOT EXISTS usage_rollups_hourly_tenant_hour ON usage_rollups_hourly (tenant_id, hour_start, model);

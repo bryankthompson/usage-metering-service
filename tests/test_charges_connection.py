@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from app import db, pricing
 from app.edge import require_entitlement
 from app.main import app
+from tests.conftest import own_pool_sessions
 
 T0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
 GOOD = {"start": T0.isoformat(), "end": (T0 + timedelta(hours=3)).isoformat()}
@@ -96,15 +97,6 @@ def checked_out() -> int:
     return stats["pool_size"] - stats["pool_available"]
 
 
-def backends(conn) -> int:
-    """Sessions on this database other than the test's own. The commit first: pg_stat_activity is a snapshot that is kept
-    until the transaction ends, so without it every poll would repeat the first answer."""
-    conn.commit()
-    return conn.execute(
-        "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()" " AND pid <> pg_backend_pid()"
-    ).fetchone()["n"]
-
-
 def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_that_has_no_thread(conn, monkeypatch):
     """60 requests, more than the ~40 worker threads, all stalled inside the read. Only a request that holds a thread may
     hold a connection: with the connection taken by a dependency, the requests still waiting for a thread held one too.
@@ -137,7 +129,7 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
             else:
                 pytest.fail(f"the burst never settled: {seen}")
             stalled_requests, held = now
-            backend_count = backends(conn)
+            backend_count = own_pool_sessions(conn)
             release.set()
             statuses = {s.result(timeout=30).status_code for s in senders}
     finally:
@@ -147,5 +139,7 @@ def test_a_burst_larger_than_the_worker_pool_holds_no_connection_for_a_request_t
     assert (
         held == stalled_requests
     ), f"{held} connections checked out for {stalled_requests} requests that hold a worker thread"
-    assert backend_count <= db.DEFAULT_POOL_MAX
+    assert (
+        1 <= backend_count <= db.DEFAULT_POOL_MAX
+    ), "the count matched no pool session, so the cap check shows nothing"
     assert statuses == {200}
