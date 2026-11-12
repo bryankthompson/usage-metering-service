@@ -239,6 +239,13 @@ expired` (db not answering; a new connection gives up after 5 s, measured with a
 retrying, because they queue for a worker thread; a stopped db answered in 4.0 s; a measurement from a walk of this runbook on 5dca15d, not a guarantee). Start or fix the db; the API needs
 no restart, and `/healthz` keeps answering 200 meanwhile: it shows the process is up and its event loop answers, not the
 database, so it does not tell you the db is up.
+A third cause is a full pool: every connection one worker may hold is in use and a request waited `DB_POOL_TIMEOUT` (default 5 s)
+for one. The edge answers the same 503 (`entitlement check unavailable`, no `Retry-After`; a request past the edge gets `database unavailable`
+with `retry-after: 1`), and the log has `no pooled connection came free: {...}` with the pool's counters (`requests_waiting`, `pool_size`, `pool_available`,
+`requests_errors`). If the db is fine, the load is above `DB_POOL_MAX` (default 40 per worker): slow statements are holding
+connections, so look at `pg_stat_activity` (`application_name = 'usage-metering-api'`) before raising it. Raise `DB_POOL_MAX` only
+while workers x `DB_POOL_MAX` stays under the Postgres `max_connections` (100); each uvicorn worker process has its own pool. A bad value
+stops the first request with a `ValueError` naming the variable.
 `{"detail":"database unavailable"}` with header `retry-after: 1` comes after the edge passed: a lock wait over 2 s or the db dying mid-request (a statement over
 15 s is 504 `{"detail":"query timed out"}` without `retry-after` on every route after the entitlement edge, including `POST /v1/usage` (`app/main.py`); covered by `tests/test_db_timeouts.py` with a real `pg_sleep`, not run against a compose stack). Nothing of the failed attempt was stored, so the same request can be
 resent. A held lock shows in the log and in the database (the usage request waited 2.02 s):
@@ -256,7 +263,7 @@ setting have no `Retry-After` either (by reading `app/webhooks.py`).
 **No answer at all** (clients time out, no 503) while `/healthz` is 200: the database may be frozen, not stopped.
 `docker compose ps -a db` then shows `Up ... (Paused)` (run). Each request already inside the database waits for a server
 that is not running, so no timeout fires, and 40 of them take every worker thread; a new request that needs a thread waits too.
-Keepalive options do not end it (measured, `docs/ingest.md`). Fix: `docker compose unpause db`; the parked requests answer 503
+The pool's connection check does not end it either: it has no timeout. Keepalive options do not end it (measured, `docs/ingest.md`). Fix: `docker compose unpause db`; the parked requests answer 503
 within seconds and can be resent. Or `docker compose restart api` (about 5 s): the parked requests are dropped, and new ones get
 503 `entitlement check unavailable` after about 5 s (7.9 s with 50 clients retrying, walk on 5dca15d) until the db is back. Both measured with a paused db and 50 requests in flight.
 

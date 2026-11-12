@@ -205,10 +205,12 @@ These are known and not fixed; see also the two assumptions above (one customer 
   Assumption, not checked against Stripe: a canceled subscription id is not reopened. Pinned by `tests/test_cancel_order.py`.
 - **Concurrency is tested with threads in one process.** Multi-process behaviour (several uvicorn workers) is not tested; the
   per-tenant advisory lock and the row lock are what it relies on.
-- **Two database connections per request.** The edge opens its own and the handler opens another, with no pool, so a busy
-  database runs out of connections sooner. That is a `psycopg.OperationalError`, which both the edge and the central handler
-  turn into 503; not tested under load. The handler takes its connection itself, only once it holds a worker thread and after
-  the checks that need no database, so a refused charges request (403 or 422) opens none (`tests/test_charges_connection.py`).
+- **Two pooled checkouts per request.** The edge borrows a connection from the pool and gives it back, and the handler borrows
+  another, so a request uses two short checkouts and never two at once. The pool is bounded (`DB_POOL_MAX`, default 40, per
+  worker process), and a wait past `DB_POOL_TIMEOUT` is a `PoolTimeout`, an `OperationalError`, so both the edge and the central
+  handler turn it into 503; the cap holds in a hand-run flood (`docs/ingest.md`), which is not a load test. The handler takes its
+  connection itself, only once it holds a worker thread and after the checks that need no database, so a refused charges request
+  (403 or 422) takes none (`tests/test_charges_connection.py`, `tests/test_pool.py`).
 - **The session time zone is pinned to UTC on every connection** (`db.connect` sets it in the statement that sets the statement
   timeout), so `PGTZ`, a URL option or the server's setting cannot change the hours the app prints or reads back. The whole suite
   passes under `PGTZ=America/New_York` (601 of 601 at 02e94c8). A connection opened by hand (`psql`) keeps its own zone.

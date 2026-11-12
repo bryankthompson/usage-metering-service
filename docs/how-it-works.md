@@ -80,7 +80,7 @@ no secret configured **503**; missing, bad or older-than-5-minutes signature **4
 The tenant is the `X-Tenant-Id` header. Missing header: **401**. No entitlement row, `canceled` or any other
 status: **402**. `active`: allowed. `past_due`: allowed while now is no later than `grace_until`, **402** after it or when no grace period is recorded.
 Any error reading the entitlement: **503**, never allowed. A database failure later in a request is **503** too (one handler for `psycopg.OperationalError` in `app/main.py`), with `Retry-After: 1`. So are
-a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open
+a wait of more than 2 seconds for a lock (resend: nothing of the failed attempt is stored) and a connection that takes more than 5 s to open or to borrow from the pool
 (the edge's own 503, "entitlement check unavailable", carries no `Retry-After`). A statement that runs more than 15 s on the request path is
 **504** `{"detail": "query timed out"}` with no `Retry-After` (the same query would time out again) on every route after the entitlement edge,
 `POST /v1/usage` included; the entitlement edge catches it itself and still answers 503. The
