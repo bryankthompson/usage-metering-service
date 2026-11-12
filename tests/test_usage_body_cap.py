@@ -128,3 +128,34 @@ def test_the_cap_still_applies_behind_a_proxy_that_mounts_the_app_under_a_prefix
              "server": ("test", 80), "client": ("test", 1)}
     asyncio.run(app(scope, receive, send))
     assert next(m["status"] for m in sent if m["type"] == "http.response.start") == 413
+
+
+def status_for(path: str, root_path: str) -> int:
+    async def receive():
+        raise AssertionError("the body was read although Content-Length already said it was too large")
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "path": path,
+             "raw_path": path.encode(), "query_string": b"", "root_path": root_path, "scheme": "http",
+             "headers": [(b"content-type", b"application/json"), (b"content-length", str(CAP + 1).encode())],
+             "server": ("test", 80), "client": ("test", 1)}
+    asyncio.run(app(scope, receive, send))
+    return next(m["status"] for m in sent if m["type"] == "http.response.start")
+
+
+def test_the_cap_applies_to_an_unprefixed_path_when_a_root_path_is_set():
+    assert status_for("/v1/usage", "/m") == 413
+
+
+def test_the_cap_does_not_apply_when_the_path_is_the_root_path_itself():
+    # route path "" is not /v1/usage: the cap steps aside and the router answers (not 413)
+    assert status_for("/m", "/m") != 413
+
+
+def test_a_path_that_only_starts_with_the_root_path_is_not_stripped():
+    # "/mx/v1/usage" with root_path "/m" is not at a path boundary: the route path stays "/mx/v1/usage", so no cap
+    assert status_for("/mx/v1/usage", "/m") != 413
