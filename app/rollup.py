@@ -38,12 +38,29 @@ RETURNING tenant_id, model, hour_start, tokens_in, tokens_out, event_count
 """
 
 # Hours that have events, are not closed, and ended at least `grace` before now (oldest first).
+# Walks the hours that have events with the (occurred_at) index: from one hour, the first event at or after the next hour
+# boundary names the next hour. That is one index probe per hour with events, not one row per event, and closed hours
+# are still visited (unclosed hours can be anywhere in the past), so the cost grows with hours, not with events.
+# `occurred_at > h.hour_start` makes every step move forward, so the walk ends even at an 'infinity' or '-infinity' row
+# (the schema allows them, the API does not): without it those rows find themselves again and the query never ends.
 DUE_HOURS = """
-SELECT DISTINCT date_trunc('hour', e.occurred_at, 'UTC') AS hour_start
-FROM usage_events e
-WHERE date_trunc('hour', e.occurred_at, 'UTC') + interval '1 hour' <= %(cutoff)s
-  AND NOT EXISTS (SELECT 1 FROM closed_hours c WHERE c.hour_start = date_trunc('hour', e.occurred_at, 'UTC'))
-ORDER BY hour_start
+WITH RECURSIVE hours(hour_start) AS (
+    SELECT date_trunc('hour', first.occurred_at, 'UTC')
+    FROM (SELECT occurred_at FROM usage_events ORDER BY occurred_at LIMIT 1) first
+  UNION ALL
+    SELECT date_trunc('hour', next.occurred_at, 'UTC')
+    FROM hours h
+    CROSS JOIN LATERAL (
+        SELECT occurred_at FROM usage_events
+        WHERE occurred_at >= h.hour_start + interval '1 hour' AND occurred_at > h.hour_start
+        ORDER BY occurred_at LIMIT 1
+    ) next
+)
+SELECT h.hour_start
+FROM hours h
+WHERE h.hour_start + interval '1 hour' <= %(cutoff)s
+  AND NOT EXISTS (SELECT 1 FROM closed_hours c WHERE c.hour_start = h.hour_start)
+ORDER BY h.hour_start
 """
 
 

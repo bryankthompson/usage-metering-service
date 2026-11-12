@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
     UNIQUE (tenant_id, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS usage_events_occurred_at ON usage_events (occurred_at);
+-- Serves the unclosed-hours check on every charges call (one tenant, a time range). On an existing large table this takes a
+-- write lock on usage_events while it builds (it cannot be CONCURRENTLY: apply_schema runs in one transaction); docs/ingest.md.
+CREATE INDEX IF NOT EXISTS usage_events_tenant_occurred_at ON usage_events (tenant_id, occurred_at);
 
 CREATE OR REPLACE FUNCTION usage_events_append_only() RETURNS trigger AS $$
 BEGIN
