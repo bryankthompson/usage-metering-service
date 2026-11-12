@@ -20,6 +20,14 @@ def pytest_sessionstart(session):
         pytest.exit(problem, returncode=2)
 
 
+@pytest.fixture(autouse=True)
+def fresh_request_pool():
+    """The request pool is made on first use from DATABASE_URL and DB_POOL_*, which tests change: start and end each test without one."""
+    db.close_pool()
+    yield
+    db.close_pool()
+
+
 @pytest.fixture
 def conn():
     """A connection to an empty, fully migrated test database. Fails loudly if Postgres is unreachable."""
