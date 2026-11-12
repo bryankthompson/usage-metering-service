@@ -9,7 +9,7 @@ python3 -m app.seekrflow replay tests/fixtures/seekr_chat.json --tenant tenant-1
 SEEKR_API_KEY=... python3 -m app.seekrflow live --tenant tenant-1 --prompt "hello"   # calls the service
 ```
 
-`replay` takes one saved response or a JSON list and prints `id in=N out=N status accepted|duplicate` per event; it exits
+`replay` takes one saved response or a JSON list and prints `<idempotency_key> in=N out=N <HTTP status> accepted|duplicate` per event (for example `chatcmpl-hand-0001 in=1000 out=500 201 accepted`); it exits
 non-zero on any error. `live` needs `SEEKR_API_KEY` in the environment, fails without it and never prints it; it has never
 been run. `fetch_chat` is tested only against a stand-in `http.server` on 127.0.0.1.
 `live --spool FILE` saves the response to FILE before posting, so a refused post can be replayed with `replay FILE`; without it

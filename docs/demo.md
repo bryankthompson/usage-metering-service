@@ -72,12 +72,19 @@ A stack started before the named volume existed kept its data in an anonymous vo
 volume stays on disk (`docker volume ls`) and the new database starts empty. To keep the data, on the old stack run
 `docker compose exec -T db pg_dump -U metering --data-only metering > data.sql` and `docker compose down`; switch to the new
 file; then `docker compose up -d --wait db` (waits for the healthcheck), `docker compose exec -T db psql -v ON_ERROR_STOP=1 -U metering -d metering < data.sql` and `docker compose up -d`.
-If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept and
-not repaired: the demo then fails in its first steps (`relation ... does not exist`, or `FAIL step 3: expected 200,
-got 500`) and the rollup container restarts in a loop. Apply the schema to the running stack, which keeps the data:
-`docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`
+If the first `docker compose up` is interrupted while the database is initialising, the half-built volume is kept: the
+demo then fails in its first steps (`relation ... does not exist`, `database "metering" does not exist`, or `FAIL step 3:
+expected 200, got 500`) and the rollup container restarts in a loop (`no pg_hba.conf entry ... database "metering"`).
+`up --wait` can still return 0 on that stack, because no healthcheck opens the `metering` database: the db's is
+`pg_isready`, the api's is `/healthz` (the process only) and the rollup has none. Check with
+`docker compose exec -T db psql -U metering -d metering -c '\dt'`, which lists the tables on a good stack. The way back is
+`docker compose down -v`, then `docker compose up -d --build --wait` again: a first start holds no data to keep, and
+`down -v` deletes the volume. Seven kills of the db container at different points of the first start, each followed by
+that fix, all ended at `demo ok`.
+To add a column that a newer `db/` file brings to a stack that has data, apply the schema to the running stack, which keeps
+the data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`
 (run twice on a demo stack with data it printed `applied` both times and kept the rows; with a column dropped by hand it
-brought the column back). `docker compose down -v` deletes the demo data and starts from nothing.
+brought the column back).
 
 ## What it does not do
 

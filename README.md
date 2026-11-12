@@ -90,10 +90,14 @@ and checks the charge; it ends with `demo ok`. Details: [docs/demo.md](docs/demo
   answers its healthcheck; a plain `up -d` returns before the api answers, so a
   run that starts too early fails: `scripts/demo.sh` prints `FAIL step 3 ... got 000`, and `scripts/flood.py` hit a
   `ConnectionResetError` on a first start. Run it again once the api answers.
-- Postgres applies the files in `db/` only when its data volume is first created, so an existing or
-  half-built volume (for example after an interrupted first start, or after an upgrade that adds a column) is not
-  repaired by `up`. Every file in `db/` is repeatable and the image carries them, so apply them to the running stack
+- Postgres applies the files in `db/` only when its data volume is first created, so an existing
+  volume (for example after an upgrade that adds a column) is not repaired by `up`. Every file in `db/` is repeatable
+  and the image carries them, so apply them to the running stack
   without losing data: `docker compose exec -T api python -c "from app import db; c=db.connect(); db.apply_schema(c); print('applied')"`.
+  After an interrupted first start the way back is `docker compose down -v`, then `docker compose up -d --build --wait`
+  again: a first start holds no data to keep. `up --wait` can return 0 on the half-built stack, because no healthcheck
+  opens the `metering` database (the db's is `pg_isready`, the api's `/healthz` checks the process only, the rollup has
+  none); the signs are `scripts/demo.sh` failing in its first steps and the rollup container restarting in a loop.
   The data lives in the named volume `pgdata`, so `docker compose down` and a recreated container keep it, and only
   `docker compose down -v` resets it (it deletes it). A stack started before the volume was named keeps its old data in an
   anonymous volume: dump it with `pg_dump --data-only` before switching ([docs/demo.md](docs/demo.md)).
