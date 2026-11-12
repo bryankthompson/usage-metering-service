@@ -56,8 +56,8 @@ input event in input order. `status` is `accepted` or `duplicate`, `event_id` an
 | 403 | an event's `tenant_id` is not the tenant the edge admitted; the detail names the index (`events[i]`), nothing is stored, the check runs before any database work |
 | 409 | an event reuses a key with a different payload, either against a stored event or against another event in the same batch; the detail names the index (or both indexes), nothing is stored |
 | 413 | the body is over 7,363,012 bytes (`MAX_BATCH_BODY_BYTES`, below). Same mechanics as the single route's 413: from `Content-Length` or while the stream arrives, before parsing and before the edge runs |
-| 422 | invalid body: an invalid event (the same rules as the single route; `loc` names the index, never the input), no events, more than 1000 events, or events in more than 48 distinct UTC hours (the elapsed range may be longer) |
-| 400, 401 / 402 / 503, 504, 503 | as for the single route (unparseable body; the edge refused; a statement past 15 s; the database went away or a lock wait ran out, `Retry-After: 1`). Nothing is stored in any of them |
+| 422 | invalid body: a body that is not JSON (`json_invalid`), an invalid event (the same rules as the single route; `loc` names the index, never the input), no events, more than 1000 events, or events in more than 48 distinct UTC hours (the elapsed range may be longer) |
+| 400, 401 / 402 / 503, 504, 503 | as for the single route (JSON nested about 10,000 levels deep, which the server cannot parse; the edge refused; a statement past 15 s; the database went away or a lock wait ran out, `Retry-After: 1`). Nothing is stored in any of them |
 
 **One bad event rejects the other 999.** The 4xx names the index of the bad event (a 422 lists every invalid one; a 403 or 409 the first), so a client fixes or drops that one and
 resends the rest. Events from different tenants cannot be mixed in a batch: the first one that is not the edge's tenant gives 403.
