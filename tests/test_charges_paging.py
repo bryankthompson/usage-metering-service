@@ -160,9 +160,10 @@ def test_mixed_case_models_page_in_the_database_order_across_a_page_boundary(cli
         r["model"]
         for r in conn.execute("SELECT model FROM usage_rollups_hourly WHERE hour_start = %s ORDER BY model", (T0,))
     ]
-    assert in_database_order != sorted(
-        in_database_order
-    )  # the test only means something if Python would order them differently
+    if in_database_order == sorted(in_database_order):
+        pytest.skip(
+            "this database orders model like Python's sorted(), so a Python-side page boundary could not differ"
+        )
     lines, _ = walk(client, span(2), 1)
     assert [(l["hour_start"], l["model"]) for l in lines] == [
         (h.isoformat().replace("+00:00", "Z"), m) for h in (T0, T0 + HOUR) for m in in_database_order
