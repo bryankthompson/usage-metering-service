@@ -56,5 +56,9 @@ catches rows that exist only in ClickHouse, which `--backfill` does not look at 
 - A derived copy, not the bill; late events are never in it, as in the Postgres rollup.
 - Best effort after the close pass, recovered by `--backfill` (run it by hand or from cron; nothing schedules it).
 - No authentication on the local ClickHouse (`CLICKHOUSE_SKIP_USER_SETUP`, port on 127.0.0.1 only), single node, no replication, no TLS.
+- Memory (measured on main 1dd2039, peak resident size of the rollup process in the container, closing 6000 due hours of 180,000
+  rollup rows): 46.2 MB with the mirror off (43.4 MB for a bare import of `app.rollup`) and 122.6 MB with it on, because the rows
+  of every closed hour wait for the copy after the close pass. `--backfill` over about 180,000 rows peaked at 311.8 MB (the one
+  full `FINAL` read). The mirror-on pass took 54.4 s against 28.5 s with it off.
 - Nothing deletes from ClickHouse. The tests use a stand-in HTTP server (`tests/test_mirror.py`); the real server was run by hand
-  once (the commands above), not in CI, and not at scale.
+  (the commands above and the memory run above), not in CI, and no larger than that memory run.
