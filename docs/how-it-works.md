@@ -15,7 +15,7 @@ they pass the cap, without buffering the rest (also with no credentials). A body
 example JSON nested very deep: measured inside the 64 KiB cap, 422 up to about 9,882 levels and 400 from about
 10,077, so the boundary lies between those two numbers): **400**.
 
-`POST /v1/usage/batch` takes `{"events": [...]}`, 1 to 1000 events spanning at most 48 UTC hours (else **422**), each
+`POST /v1/usage/batch` takes `{"events": [...]}`, 1 to 1000 events occupying at most 48 distinct UTC-hour buckets (else **422**; the elapsed date range may be longer), each
 validated and deduplicated exactly as above, in one transaction: if any event is refused (403, 409, 422) or the database fails,
 nothing is stored and the whole batch can be resent. It answers **201** with `accepted`, `duplicate` and one `results` entry per event
 (`idempotency_key`, `status`, `event_id`, `late`) in input order, or **200** when every event was already stored. A key repeated inside the

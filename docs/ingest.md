@@ -75,8 +75,8 @@ Python before the database is opened, because the INSERT would otherwise keep an
   Ascending order keeps two batches from waiting on each other's hours. An event is therefore in its closed rollup or flagged `late`,
   never neither; `test_ingest_batch.py` races batches against `close_hour` for this.
 - **Why at most 48 hours:** each distinct hour is one lock in Postgres's shared lock table (6,400 slots by default), and each lock wait can cost the full 2 s,
-  so H hours can wait H x 2 s, which passes the 15 s statement timeout and answers 504 (the lock wait is bounded per lock, not per request). A real batch spans a
-  few hours. A full lock table fails the lock request with "out of shared memory", a 503; it does not block other sessions.
+  so H hours can wait up to H x 2 s in total (each wait is bounded on its own, and one that runs out answers 503; the 15 s statement timeout is per
+  statement and each lock is its own statement, so the total is not capped by it). A real batch spans a few hours. A full lock table fails the lock request with "out of shared memory", a 503; it does not block other sessions.
   Hours are counted in UTC, whatever offset the timestamps are written in.
 - **Why a JSON array plus `unnest`, not NDJSON plus `COPY`:** the body is validated by the same pydantic model as the single route, so the rules cannot drift
   apart, and one INSERT with `ON CONFLICT` gives the single route's dedupe and `late` rule per row; `COPY` cannot skip a conflicting row, and a staging table would be more machinery for the same result.

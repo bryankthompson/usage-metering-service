@@ -178,8 +178,8 @@ def _store(event: UsageEvent, response: Response, tenant: str, conn: psycopg.Con
 MAX_BATCH_EVENTS = 1000
 # Each distinct UTC hour in a batch is one advisory lock in Postgres's shared lock table (max_locks_per_transaction x
 # max_connections slots, 6,400 by default; when it is full a lock request fails with "out of shared memory", a 503), and
-# each lock wait can cost the whole db.LOCK_WAIT, so D hours can wait D x 2 s (past the 15 s statement timeout: a 504).
-# A real batch spans a few hours.
+# each lock wait can cost the whole db.LOCK_WAIT (a wait that runs out is a 503), so D hours can wait up to D x 2 s in
+# total; the 15 s statement timeout is per statement and each lock is its own statement. A real batch spans a few hours.
 MAX_BATCH_HOURS = 48
 
 

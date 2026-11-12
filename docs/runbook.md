@@ -152,8 +152,8 @@ body, or `occurred_at` not ISO text), 413 (body over 64 KiB: step 12), or an edg
     WARNING:  usage conflict: tenant=demo-... key='late-1' reused with a different payload (event_id=4)
     WARNING:  usage rejected: body tenant 'lapsed-co' is not the entitled tenant 'demo-...'
     2026-11-11 01:11:02,586 WARNING app.edge edge denied: tenant='gone-co' status=402 reason=not entitled: status canceled
-`POST /v1/usage/batch` stores all of its events or none, so after any non-2xx answer none of that batch is in the table and the whole
-batch can be resent. Its 201 or 200 carries one result per event (`status`, `event_id`, `late`), and its log lines are
+`POST /v1/usage/batch` stores all of its events or none, so after a non-2xx answer the database refused it and none of that batch is in the table; the whole
+batch can be resent. If the connection drops while the commit or the response is in flight, the batch may be stored though the client saw no answer: resend it, the dedupe returns it as duplicates. Its 201 or 200 carries one result per event (`status`, `event_id`, `late`), and its log lines are
 `usage batch: tenant=... events=N accepted=N duplicate=N` (INFO) and `usage batch conflict:` / `usage batch rejected:` (WARNING; the 403
 and 409 details name the index, `events[i]`).
 Missing: no row, so it was never accepted; ask the client for the status it saw. The hour is the UTC hour of `occurred_at`,
