@@ -2,7 +2,6 @@
 import socket
 import threading
 import time
-from datetime import datetime, timezone
 
 import psycopg
 import pytest
