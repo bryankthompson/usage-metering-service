@@ -260,7 +260,10 @@ def play(args) -> int:
                for line in charges["lines"]}
         want = expected_lines({k: tuple(v) for k, v in usage[role].items()}, prices)
         total = expected_total(want)
-        ok = got == want and charges["total_micros"] == total
+        # The client rule (docs/billing.md, Paging): the lines held must be the whole range and add up to the total.
+        ok = (got == want and charges["total_micros"] == total and charges["next_cursor"] is None
+              and charges["line_count"] == len(charges["lines"]) == len(want)
+              and sum(line["micros"] for line in charges["lines"]) == charges["total_micros"])
         if not ok:
             failed = True
             print(f"MISMATCH {tenant}: API total {charges['total_micros']} vs expected {total}", file=sys.stderr)

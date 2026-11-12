@@ -84,6 +84,13 @@ echo "step 6: rollup -> closed hour=$ISO"
 STEP_WHAT="charges for the hour"
 call 7 200 "$BASE/v1/tenants/$TENANT/charges?start=$HOUR&end=$NEXT" -H "X-Tenant-Id: $TENANT"
 python3 -m json.tool "$TMP/body"
-TOTAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["total_micros"])' "$TMP/body")
+# The client rule (docs/billing.md, Paging): no next_cursor, and the lines held add up to the total.
+TOTAL=$(python3 -c '
+import json, sys
+body = json.load(open(sys.argv[1]))
+lines = body["lines"]
+assert body["next_cursor"] is None and body["line_count"] == len(lines), "a partial page"
+assert sum(l["micros"] for l in lines) == body["total_micros"], "the lines do not add up to the total"
+print(body["total_micros"])' "$TMP/body") || { echo "FAIL step 7: the client rule does not hold"; cat "$TMP/body"; exit 1; }
 [ "$TOTAL" = 6000 ] || { echo "FAIL step 7: expected total_micros 6000, got $TOTAL"; cat "$TMP/body"; exit 1; }
 echo "demo ok"
