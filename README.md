@@ -1,5 +1,11 @@
 # usage-metering-service
 
+> **What this is.** A working usage-metering and billing service, built by AI coding sessions under a review harness that the
+> operator designed and ran: briefs that fix which files a job may touch, a review desk that cannot merge, a merge gate
+> that needs a review receipt, green CI and a current `main`, mutation checks and red-team lenses.
+> It is a demonstration of that method, and [docs/how-it-was-built.md](docs/how-it-was-built.md) is the record of what the
+> method caught. The scope is the path from a usage event to a charge; the rest is listed under [Not built](#not-built).
+
 Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service stores each event
 once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
 Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
