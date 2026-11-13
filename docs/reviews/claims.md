@@ -8,6 +8,7 @@ SHA tested: 843163a1b3e2845d8a84beaa9012d5aebec1f8a4 (fresh clone, README "Run i
 COMPOSE_PROJECT_NAME=rt-claims API_PORT=18400 DB_PORT=15400).
 
 Status: PARTIAL. README and docs/billing, ingest, reconcile, design-notes, code-tour, the adapter doc, build-log checked in full.
+Note, 2026-11-12: docs/code-tour.md was removed after this review; the findings about it stay as written.
 docs/runbook.md, docs/testing.md, docs/demo.md only spot-checked (in-flight lane); re-check owed against the lead's final SHA.
 
 Counts: MAJOR 0, MINOR 9, NOTE 6.

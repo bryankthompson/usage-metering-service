@@ -25,6 +25,8 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 > a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one compose line, a format commit shown AST-equal,
 > a measurement script and a rebase of a head DRC had reviewed at high).
 
+> Note, 2026-11-12: docs/code-tour.md (added in PR #14) was removed on 2026-11-12; the entries below stay as written.
+
 ## Log
 
 - **15:03** Requests to build this arrived at the lead as messages from two other cockpits. They were

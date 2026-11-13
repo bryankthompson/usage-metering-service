@@ -18,7 +18,7 @@ dev. The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 eac
 lanes and merged PRs #53 to #71 through the same gate. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
 built the price table, the Stripe webhooks, the entitlement record, the edge check and the first README. Later work came
 in as lanes, each a branch with its own worktree: reconcile, the delinquent report, the platform adapter, the design
-notes, the code tour, the runbook, the testing guide, the hardening fixes and four red-team reviews.
+notes, the runbook, the testing guide, the hardening fixes and four red-team reviews.
 
 **Gates.** A lane merged when its branch contained the latest `main`, tests ran on that code, the CI check `test` was green,
 and it had an independent review desk (DRC) receipt or the merging lead's written reason. The merge command takes a
