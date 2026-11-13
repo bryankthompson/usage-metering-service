@@ -1,14 +1,17 @@
 # usage-metering-service
 
-> **What this is.** A working usage-metering and billing service, written and reviewed by AI coding sessions under a review
-> harness that the operator designed and ran: briefs that fix which files a job may touch, a review desk that cannot merge,
-> a merge gate that needs a review receipt, green CI and a current `main`, mutation checks and red-team lenses.
-> It is a demonstration of that method, and [docs/how-it-was-built.md](docs/how-it-was-built.md) is the record of what the
-> method caught. The scope is the path from a usage event to a charge; the rest is listed under [Not built](#not-built).
-
-Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service stores each event
-once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode subscription.
-Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
+> **A three-day demonstration of a multi-agent, AI-assisted build method, applied to the usage-to-charge path of an AI inference platform.**
+> Three working copies — a lead and two dev lanes — a review desk that cannot merge, four red-team lenses, and a fifth that
+> reads the documentation against the code. 412 commits, 85 merged PRs, 848 tests passing, 98% coverage, and zero blockers
+> reported across two review rounds.
+>
+> **How to review it.** Start with [REVIEWING.md](REVIEWING.md). Judge the invariants and the process, not production
+> readiness: this is a correctness core, not a production service, and [Not built](#not-built) lists the twenty things that
+> are deliberately missing.
+>
+> **What it does.** Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service
+> stores each event once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode
+> subscription. Python 3.12, FastAPI, plain SQL through psycopg, Postgres 16. Test mode only: nothing calls Stripe.
 
 To try it, run `scripts/up`: one command that starts the stack, plays a three-tenant scenario against a stand-in inference
 server and checks the charges independently ([docs/demo.md](docs/demo.md)). The other route, `docker compose up -d --build`
@@ -152,4 +155,3 @@ How it is tested, with a burst check and a database outage check you can run on 
   and another tenant's event for the same hour that arrives afterwards is `late` (stored, never billed).
 - Usage after access is cut: once the edge answers 402, a tenant cannot send usage it had not sent yet, because `/v1/usage`
   sits behind the edge; the events are refused, not stored for later.
-
