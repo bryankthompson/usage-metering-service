@@ -18,7 +18,8 @@ artifact; the method is the record in [docs/how-it-was-built.md](docs/how-it-was
 3. **Is the evidence trustworthy?** The suite runs against a real PostgreSQL (counts in the table below); about 98% line
    coverage; ruff and mypy clean; a coverage floor of 92% in CI; a Docker build, a compose config check and an end-to-end smoke in the same CI job.
 4. **Is the method real?** The roles, the gates, the red-team lenses and the mutation checks are in
-   [docs/how-it-was-built.md](docs/how-it-was-built.md); the merge history is one reviewable PR per change. The README states
+   [docs/how-it-was-built.md](docs/how-it-was-built.md); the merge history is one reviewable PR per product change, with four
+   scaffold and setup commits landing directly on `main` before the gate was in place. The README states
    the scope item by item under Not built.
 
 **Scope.** This is a correctness core. Identity and the ingest queue are under [Not built](README.md#not-built); migrations,
@@ -40,7 +41,7 @@ Every merge needed green CI, a current `main`, and a review receipt or the mergi
 written reasons through #84; the receipts are kept outside the repo, which keeps each merge commit and the build log). Each
 lane was briefed to run a fix's guarding test against the old code and see it fail, then break the new rule by one line and
 watch the test go red; [docs/how-it-was-built.md](docs/how-it-was-built.md) lists the exceptions. The merge history is one
-reviewable PR per change.
+reviewable PR per product change, with four scaffold and setup commits landing directly on `main` before the gate was in place.
 
 ## The numbers
 
@@ -52,7 +53,7 @@ reviewable PR per change.
 | Tests | 8,399 lines in 36 files; 849 passing |
 | Coverage | about 98% line coverage (CI floor 92%) |
 | Static checks | ruff format, ruff check, mypy — clean |
-| Review | 5 lenses, 2 rounds: 0 blockers, 12 major, 17 minor, plus 9 minor from the claims lens |
+| Review | 5 lenses, 2 red-team rounds plus follow-up passes: 0 blockers, 12 major, 17 minor, plus 10 minor from the claims lens (9 first pass, 1 final check) |
 
 ## The 10-minute path
 

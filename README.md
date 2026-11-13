@@ -51,7 +51,7 @@ the latest `main` with green CI; a mutation check (break the new rule by one lin
 lenses (money, concurrency, security, operations), each counting a finding only with a command or a failing test that shows it; and
 agents with no context who read a clean copy of the tree. Round one of the red team found 0 blockers, 9 major and 10 minor,
 and round two 0 blockers reported, 3 major and 7 minor; a fifth lens that checked the README and docs against the code found
-0 major and 9 minor.
+0 major and 9 minor in its first pass, and 1 more in its final check.
 
 Who checked it. Every reviewer was a model, except that the operator read five functions on the money and entitlement path as they stood on 2026-11-11 (commit `5dca15d`):
 `_store`, `close_hour`, `_in_force` with `_rate`, `require_entitlement` and `_apply_subscription`. The reviewers found real
