@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/49b6a0c5-9c64-44b0-80d1-834799a65c56
+
 # usage-metering-service
 
 **Watch it (about 95 seconds, a synthetic voice narrates):** a real run on `main`, from a stopped stack to a priced bill, then the record of the method.
