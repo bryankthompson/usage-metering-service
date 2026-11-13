@@ -11,7 +11,7 @@ when its episode began, and the merge times are in `git log --first-parent --mer
   writes each dev's brief, reviews, and is the only session that merges.
 - **Dev A**: usage intake and hourly rollups.
 - **Dev B**: price table, Stripe webhooks, entitlements, edge check.
-- Each dev works on its own branch in its own clone and never merges. Before each merge the branch is
+- Each dev works on its own branch in its own working copy and never merges. Before each merge the branch is
   rebased onto the latest `main` and the tests run on the rebased code. Every branch gets a DRC review
   (an independent reviewer desk) and green CI before it merges.
 
@@ -19,8 +19,8 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 > on 2026-11-11: the adapter, `seekrflow`, is now named everywhere (see docs/how-it-was-built.md section 8). It still runs on hand-written
 > fixtures; no call to the real service has been made. The repo's own name stays generic.
 
-> Note, 2026-11-12: the lead cockpit merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone
-> ran as lead of its own lanes and merged #53 to #71 through the same gate. The merge command takes a review receipt for the
+> Note, 2026-11-12: the lead cockpit merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev
+> worked as lead of its own lanes and merged #53 to #71 through the same gate. The merge command takes a review receipt for the
 > branch or the merging lead's written reason; green CI and a current `main` apply to both. Through #84, 69 merges carried
 > a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one compose line, a format commit shown AST-equal,
 > a measurement script and a rebase of a head DRC had reviewed at high).
@@ -35,9 +35,9 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 - **15:08** Lead wrote the scaffold: schema split into `db/001_usage.sql` (dev A) and
   `db/002_billing.sql` (dev B), stub routers, a deny-all edge stub, compose file, CI workflow. Four
   scaffold tests pass against a local Postgres 16.
-- **15:14** Private GitHub repo created and the scaffold pushed; CI (`test`) green on `main`. Two clones made and
+- **15:14** Private GitHub repo created and the scaffold pushed; CI (`test`) green on `main`. Two working copies made and
   the cockpit installed in each. The lead wrote a common brief (rules, handoff protocol) and one brief per dev.
-- **15:24** The operator opened a Claude session in each dev clone and pointed it at its brief. Dev A starts on
+- **15:24** The operator opened a Claude session in each dev working copy and pointed it at its brief. Dev A starts on
   usage intake (`lane/ingest`), dev B on the price table (`lane/pricing`).
 - **15:26** Both devs sent a `HANDOFF:` message within a minute of each other: dev A `lane/ingest` (29 tests),
   dev B `lane/pricing` (26 tests). Each had rebased onto `main`, run its tests on the rebased branch and
@@ -320,7 +320,7 @@ when its episode began, and the merge times are in `git log --first-parent --mer
 
 - **2026-11-12 (PRs #48 to #84).** The operator-read, role-wording and testing-guide updates recorded who read five functions
   and clarified the roles. Later, the lead cockpit merged PRs #48 to #52 and #72 to #82, plus #84; from 2026-11-11 each
-  dev clone ran as lead of its own lanes and merged #53 to #71 through the same gate. Through #84, 69 merges carried a DRC
+  dev worked as lead of its own lanes and merged #53 to #71 through the same gate. Through #84, 69 merges carried a DRC
   receipt and 14 a written reason, including docs, CI steps, tests, one index, one compose line, a format commit shown
   AST-equal, a measurement script and a rebase of a head DRC had reviewed at high. DRC reviewed the request-path pool
   (#67) and charges paging (#65) at high, and batch ingest (#64) at high before its rebase. The outside review of

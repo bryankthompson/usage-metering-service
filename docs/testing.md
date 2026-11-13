@@ -59,7 +59,7 @@ Then each dev attacked the other's slice. These were found after both, one line 
 | `app/edge.py` | a non-ASCII tenant header arrived as mojibake, so that tenant was never admitted |
 
 The review desk is a separate read-only model, not a person. The lead merged PRs #1 to #52 and #72 to #82, plus #84.
-From 2026-11-11 each dev clone ran as lead of its own lanes and merged #53 to #71 through the same gate. The merge
+From 2026-11-11 each dev worked as lead of its own lanes and merged #53 to #71 through the same gate. The merge
 command takes a review receipt for the branch or the merging lead's written reason; green CI and a current `main` apply
 to both. Through #84, 69 merges carried a DRC receipt and 14 a written reason (docs, CI steps, tests, one index, one
 compose line, a format commit shown AST-equal, a measurement script and a rebase of a head DRC had reviewed at high).

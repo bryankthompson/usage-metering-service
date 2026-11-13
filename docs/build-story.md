@@ -14,7 +14,7 @@ record; this is the short version.
 briefed to follow, the review rounds with their counts, what went wrong and the limits of the method.
 
 **Roles.** The lead wrote the scaffold (schema split by owner, stub routers, a deny-all edge, compose, CI) and one brief per
-dev. The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone ran as lead of its own
+dev. The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev worked as lead of its own
 lanes and merged PRs #53 to #71 through the same gate. Dev A built usage intake, rollups and the end-to-end test and demo. Dev B
 built the price table, the Stripe webhooks, the entitlement record, the edge check and the first README. Later work came
 in as lanes, each a branch with its own worktree: reconcile, the delinquent report, the platform adapter, the design
