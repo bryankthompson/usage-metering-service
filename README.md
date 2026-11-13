@@ -122,7 +122,6 @@ To test against your own database:
 `DATABASE_URL=postgresql://... uv run pytest -q`. `scripts/test` starts one shared container, `metering-test-db`,
 on 127.0.0.1:5455 and leaves it running; `docker rm -f metering-test-db` removes it.
 How it is tested, with a burst check and a database outage check you can run on a live stack, and what is not covered: [docs/testing.md](docs/testing.md).
-A reading guide to the code, file by file: [docs/code-tour.md](docs/code-tour.md).
 
 ## Not built
 
