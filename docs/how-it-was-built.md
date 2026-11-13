@@ -10,8 +10,8 @@ what the person running the sessions decided.
 
 The operator (the person running the sessions) opened them and answered scope questions. One session, the
 lead, wrote the scaffold (schema split by owner, stub routers, a deny-all edge, CI), and wrote a brief for each job.
-The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev clone ran as lead of its own lanes
-and merged #53 to #71 through the same gate. The work lived in three clones of the one repository: the lead's,
+The lead merged PRs #1 to #52 and #72 to #82, plus #84. From 2026-11-11 each dev worked as lead of its own lanes
+and merged #53 to #71 through the same gate. The work lived in three working copies of the one repository: the lead's,
 and one for each of two devs (dev A:
 intake, rollups, end-to-end; dev B: prices, webhooks, entitlements, edge). A standing advisor session gave the lead second opinions. An
 independent review desk (DRC) reviewed submitted branches as separate read-only jobs. Later work ran as short-lived lanes, one
