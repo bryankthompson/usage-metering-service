@@ -1,9 +1,9 @@
 # Reviewing this repository
 
-**Short version:** this is a three-day, multi-agent build of the usage-to-charge path for an AI inference platform. It is a
-correctness core and a record of how it was checked — not a production service. The full build record is in
-[docs/how-it-was-built.md](docs/how-it-was-built.md); the review reports are in [docs/reviews/](docs/reviews/README.md).
-The numbers below are as of commit `4d45551`.
+**Short version:** this is a three-day, multi-agent build of the usage-to-charge path for an AI inference platform. Models
+wrote and reviewed the code; the operator designed the briefs, the merge gates and the red-team lenses. The service is the
+artifact; the method is the record in [docs/how-it-was-built.md](docs/how-it-was-built.md) and
+[docs/reviews/](docs/reviews/README.md). The numbers below are as of commit `4d45551`.
 
 ## What to judge
 
@@ -17,13 +17,29 @@ The numbers below are as of commit `4d45551`.
    terminal-delete rule and a same-second tie rule ([app/webhooks.py](app/webhooks.py#L140-L162)).
 3. **Is the evidence trustworthy?** 848 tests pass against a real PostgreSQL, 1 skipped; 98% line coverage; ruff and mypy
    clean; a coverage floor of 92% in CI; a Docker build, a compose config check and an end-to-end smoke in the same CI job.
-4. **Is the scope honest?** The README lists 20 things that are not built. The review reports list what each reviewer did
-   not reach. Nothing claims to be production-ready.
+4. **Is the method real?** The roles, the gates, the red-team lenses and the mutation checks are in
+   [docs/how-it-was-built.md](docs/how-it-was-built.md); the merge history is one reviewable PR per change. The README lists
+   20 things that are not built, so the scope is stated rather than implied.
 
-**What this is not.** It is not a production service: identity is a header, and there are no migrations, metrics or queue.
-It is not a Seekr integration test: no key was available, so the adapter is built from the published schema and tested
-against hand-written fixtures. It is not unattended: every merge needed a review receipt and green CI, and the operator read
-the five functions on the money and entitlement path.
+**What this is not.** It is a correctness core, not a production service. Identity, migrations, metrics and the ingest queue
+are the next phase, and the README lists them under [Not built](README.md#not-built). It is not a Seekr integration test: no
+key was available, so the adapter is built from Seekr's public API reference and tested against hand-written fixtures and a
+stand-in server.
+
+## How the agents were used
+
+| Role | What it did | Where to see it |
+|---|---|---|
+| Lead | Scaffold, schema split by owner, one brief per job, merges | [docs/how-it-was-built.md](docs/how-it-was-built.md) |
+| Dev A | Intake, rollups, the end-to-end scenario | [app/ingest.py](app/ingest.py), [app/rollup.py](app/rollup.py), [scripts/scenario.py](scripts/scenario.py) |
+| Dev B | Prices, webhooks, entitlements, the edge | [app/pricing.py](app/pricing.py), [app/webhooks.py](app/webhooks.py), [app/edge.py](app/edge.py) |
+| Review desk | Read-only review of each head; it cannot merge | [docs/reviews/](docs/reviews/README.md) |
+| Red-team lenses | Money, concurrency, security, operations; a finding counts only with a repro | [docs/reviews/](docs/reviews/README.md) |
+| Claims lens | README and docs checked against the code, sentence by sentence | [docs/reviews/claims.md](docs/reviews/claims.md) |
+
+Every merge needed a review receipt, green CI and a current `main`. Before a fix merged, its guarding test was run against
+the old code and seen to fail, and the new rule was broken by one line to watch the test go red. The merge history is one
+reviewable PR per change.
 
 ## The numbers
 
@@ -61,14 +77,14 @@ the five functions on the money and entitlement path.
 
 The full list is the README's [Not built](README.md#not-built) section.
 
-## Where the risk is concentrated
+## What is worth opening
 
-| Area | Why it matters | What to inspect |
-|---|---|---|
-| `app/seekrflow.py` | The only unverified seam: no key, so the real response shape is unseen | 94 statements, hand-written fixtures, a stand-in server; `live` is the one command that needs a key |
-| `app/bodylimit.py` | FastAPI parses the body before dependencies, so the cap must run before the edge | The ASGI guard, `Content-Length`, and the stream counter |
-| `app/webhooks.py` | Highest complexity (E/38) and the subtlest state machine | Terminal delete, same-second tie, grace window that does not slide |
-| `app/pricing.py` | Second highest (D/23); it rates the whole range on every page | Server-side cursor, repeatable-read snapshot, cursor validation |
+| Area | Why it is worth opening |
+|---|---|
+| `app/seekrflow.py` | The integration seam: 94 statements built from Seekr's public API reference, tested against fixtures and a stand-in server. `live` is one command away when a key exists. |
+| `app/webhooks.py` | The most rule-dense function in the service: terminal delete, same-second tie, a grace window that does not slide. |
+| `app/pricing.py` | The charges pass: rates the whole range in constant memory per page, with a server-side cursor and a repeatable-read snapshot. |
+| `app/rollup.py` | The hour-close protocol: a shared/exclusive advisory lock pair and a recursive CTE that walks only the hours that have events. |
 
 ## Run it
 

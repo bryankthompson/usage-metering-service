@@ -1,6 +1,6 @@
 # usage-metering-service
 
-> **A three-day demonstration of a multi-agent build method, applied to the usage-to-charge path of an AI inference platform.**
+> **A three-day demonstration of a multi-agent, AI-assisted build method, applied to the usage-to-charge path of an AI inference platform.**
 > Three working copies — a lead and two dev lanes — a review desk that cannot merge, four red-team lenses, and a fifth that
 > reads the documentation against the code. 412 commits, 85 merged PRs, 848 tests passing, 98% coverage, and zero blockers
 > reported across two review rounds.
