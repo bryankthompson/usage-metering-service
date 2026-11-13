@@ -1,12 +1,8 @@
-
-
-https://github.com/user-attachments/assets/49b6a0c5-9c64-44b0-80d1-834799a65c56
-
 # usage-metering-service
 
 **Watch it (about 95 seconds, a synthetic voice narrates):** a real run on `main`, from a stopped stack to a priced bill, then the record of the method.
 
-<!-- DRAG usage-metering-demo.mp4 ONTO THIS LINE IN THE GITHUB EDITOR; the player link replaces this comment. -->
+https://github.com/user-attachments/assets/49b6a0c5-9c64-44b0-80d1-834799a65c56
 
 > **A demonstration of a multi-agent, AI-assisted build method, applied to the usage-to-charge path of an AI inference platform.**
 > Three working copies — a lead and two dev lanes — a review desk that cannot merge, four red-team lenses, and a fifth that
