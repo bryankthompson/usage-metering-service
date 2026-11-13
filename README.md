@@ -2,12 +2,11 @@
 
 > **A three-day demonstration of a multi-agent, AI-assisted build method, applied to the usage-to-charge path of an AI inference platform.**
 > Three working copies — a lead and two dev lanes — a review desk that cannot merge, four red-team lenses, and a fifth that
-> reads the documentation against the code. 412 commits, 85 merged PRs, 848 tests passing, 98% coverage, and zero blockers
-> reported across two review rounds.
+> reads the documentation against the code. 412 commits, 85 merged PRs, 849 tests passing, about 98% coverage, and zero blockers
+> reported across two review rounds (counts as of commit `4d45551`).
 >
-> **How to review it.** Start with [REVIEWING.md](REVIEWING.md). Judge the invariants and the process, not production
-> readiness: this is a correctness core, not a production service, and [Not built](#not-built) lists the twenty things that
-> are deliberately missing.
+> **How to review it.** Start with [REVIEWING.md](REVIEWING.md). Judge the invariants and the process: this is a
+> correctness core for the path from a usage event to a charge, and [Not built](#not-built) states where that scope ends.
 >
 > **What it does.** Usage metering and billing for AI inference traffic. Tenants report token counts per model; the service
 > stores each event once, totals them per hour, prices them in integer micro-USD, and gates access on a Stripe test-mode
@@ -43,8 +42,8 @@ The operator designed the process that made AI-written code mergeable, and this 
 caught and missed. Models wrote and reviewed the code; the operator designed and ran the method around them.
 
 The method: one brief per job that fixed which files it could touch; a review desk (DRC) that reads each change and cannot
-merge; a merge command that refuses without a review receipt for the branch, a head that contains the latest `main` and
-green CI; a mutation check (break the new rule by one line, watch the guarding test fail, revert); four read-only red-team
+merge; a merge command that takes a review receipt for the branch or the merging lead's written reason, on a head that contains
+the latest `main` with green CI; a mutation check (break the new rule by one line, watch the guarding test fail, revert); four read-only red-team
 lenses (money, concurrency, security, operations), each counting a finding only with a command or a failing test that shows it; and
 agents with no context who read a clean copy of the tree. Round one of the red team found 0 blockers, 9 major and 10 minor,
 and round two 0 blockers reported, 3 major and 7 minor; a fifth lens that checked the README and docs against the code found
