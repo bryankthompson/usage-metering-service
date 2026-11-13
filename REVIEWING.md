@@ -1,6 +1,6 @@
 # Reviewing this repository
 
-**Short version:** this is a three-day, multi-agent build of the usage-to-charge path for an AI inference platform. Models
+**Short version:** this is a multi-agent build of the usage-to-charge path for an AI inference platform. Models
 wrote and reviewed the code; the operator designed the briefs, the merge gates and the red-team lenses. The service is the
 artifact; the method is the record in [docs/how-it-was-built.md](docs/how-it-was-built.md) and
 [docs/reviews/](docs/reviews/README.md). The numbers below are as of commit `4d45551`.
