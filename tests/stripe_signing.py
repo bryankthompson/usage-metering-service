@@ -44,7 +44,11 @@ def subscription_event(
     return event(event_id, event_type, created, sub)
 
 
-def payment_failed_event(event_id: str, created: int, customer: str = "cus_test_1") -> bytes:
-    return event(
-        event_id, "invoice.payment_failed", created, {"id": "in_test_1", "object": "invoice", "customer": customer}
-    )
+def payment_failed_event(
+    event_id: str, created: int, customer: str = "cus_test_1", subscription: str | None = None
+) -> bytes:
+    """`subscription=None` leaves the invoice's subscription id out of the payload."""
+    invoice = {"id": "in_test_1", "object": "invoice", "customer": customer}
+    if subscription is not None:
+        invoice["subscription"] = subscription
+    return event(event_id, "invoice.payment_failed", created, invoice)

@@ -191,6 +191,28 @@ def test_payment_failed_does_not_reopen_a_canceled_tenant(client, conn):
     assert (r["status"], r["grace_until"]) == ("canceled", None)
 
 
+def test_payment_failed_for_an_old_subscription_leaves_the_replacement_alone(client, conn):
+    # The tenant moved from sub_old to sub_new (same customer). A late failure of an invoice on sub_old is not a
+    # failure of the subscription the tenant now holds.
+    post(client, subscription_event("evt_1", T, sub_id="sub_old"))
+    post(client, subscription_event("evt_2", T + 100, sub_id="sub_new"))
+    resp = post(client, payment_failed_event("evt_3", T + 200, subscription="sub_old"))
+    assert resp.json() == {"status": "ignored"}
+    r = row(conn)
+    assert (r["status"], r["payment_failed_at"], r["grace_until"]) == ("active", None, None)
+    assert r["stripe_subscription_id"] == "sub_new"
+
+
+def test_payment_failed_for_the_current_subscription_still_opens_the_grace(client, conn):
+    post(client, subscription_event("evt_1", T, sub_id="sub_old"))
+    post(client, subscription_event("evt_2", T + 100, sub_id="sub_new"))
+    resp = post(client, payment_failed_event("evt_3", T + 200, subscription="sub_new"))
+    assert resp.json() == {"status": "processed"}
+    r = row(conn)
+    assert (r["status"], r["payment_failed_at"]) == ("past_due", at(T + 200))
+    assert r["grace_until"] == at(T + 200) + timedelta(hours=72)
+
+
 def test_unhandled_event_type_is_ignored(client, conn):
     resp = post(client, event("evt_1", "customer.created", T, {"id": "cus_test_1"}))
     assert resp.status_code == 200 and resp.json() == {"status": "ignored"}
