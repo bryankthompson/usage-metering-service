@@ -207,6 +207,17 @@ def _apply_payment_failed(conn: psycopg.Connection[DictRow], event: dict, create
     if row is None:
         return "ignored", None
     tenant_id = row["tenant_id"]
+    invoice_sub = _text(event["data"]["object"].get("subscription"))
+    if invoice_sub and row["stripe_subscription_id"] and invoice_sub != row["stripe_subscription_id"]:
+        # The row is found by customer, and a tenant can move to a new subscription under the same customer. A failure
+        # of an invoice on an old subscription says nothing about the one the tenant holds now: it must not open a grace.
+        log.info(
+            "webhook ignored: invoice failure for subscription %.80r, tenant=%r holds %r",
+            invoice_sub,
+            tenant_id,
+            row["stripe_subscription_id"],
+        )
+        return "ignored", tenant_id
     if row["last_event_at"] and created < row["last_event_at"]:
         if row["status"] == "past_due" and row["grace_until"] is None:
             # A newer past_due subscription event arrived first: the older invoice failure still opens the grace window.
